@@ -222,76 +222,108 @@
 
       <section class="card module-panel hidden" id="adjustment-clean-module">
         <h2>调剂数据清洗</h2>
-        <p class="subtitle">按“研招网 + 小木虫”检索策略抓取候选，再做正文清洗、关键词匹配与名额提取。</p>
-        <form id="adjustment-clean-form" class="form-grid">
-          <label>
-            院校名称
-            <input id="adjustment-clean-school" required placeholder="例如：四川轻化工大学" />
-          </label>
-          <label>
-            专业/学院关键词（可选）
-            <input id="adjustment-clean-major" placeholder="例如：外国语言文学 / 外语学院" />
-          </label>
-          <label>
-            年份（可选）
-            <input id="adjustment-clean-year" placeholder="例如：2026" />
-          </label>
-          <label>
-            关键词（可选，逗号分隔）
-            <input id="adjustment-clean-keywords" placeholder="例如：调剂, 缺额, 复试, 名额" />
-          </label>
-          <label>
-            清洗级别
-            <select id="adjustment-clean-level">
-              <option value="loose">轻度清洗</option>
-              <option value="standard" selected>正常清洗</option>
-              <option value="strict">严格清洗</option>
-            </select>
-          </label>
-          <label>
-            最大输出条数
-            <input id="adjustment-clean-limit" type="number" min="5" max="80" value="30" />
-          </label>
-          <div class="actions">
-            <label class="check-row"><input type="checkbox" name="adjustment-clean-sources" value="yanzhao" checked />研招网</label>
-            <label class="check-row"><input type="checkbox" name="adjustment-clean-sources" value="muchong" checked />小木虫</label>
-          </div>
-          <div class="actions">
-            <button type="submit" id="adjustment-clean-run-btn">抓取并清洗</button>
-            <button type="button" id="adjustment-clean-export-btn" class="muted">导出选中为 Markdown</button>
-          </div>
-        </form>
+        <div class="module-split">
+          <div class="module-main">
+            <p class="subtitle">按“研招网 + 小木虫”检索策略抓取候选，再做正文清洗、关键词匹配与名额提取。</p>
+            <form id="adjustment-clean-form" class="form-grid">
+              <label>
+                院校名称
+                <input id="adjustment-clean-school" required placeholder="例如：四川轻化工大学" />
+              </label>
+              <label>
+                专业/学院关键词（可选）
+                <input id="adjustment-clean-major" placeholder="例如：外国语言文学 / 外语学院" />
+              </label>
+              <label>
+                年份（可选）
+                <input id="adjustment-clean-year" placeholder="例如：2026" />
+              </label>
+              <label>
+                关键词（可选，逗号分隔）
+                <input id="adjustment-clean-keywords" placeholder="例如：调剂, 缺额, 复试, 名额" />
+              </label>
+              <label>
+                清洗级别
+                <select id="adjustment-clean-level">
+                  <option value="loose">轻度清洗</option>
+                  <option value="standard" selected>正常清洗</option>
+                  <option value="strict">严格清洗</option>
+                </select>
+              </label>
+              <label>
+                最大输出条数
+                <input id="adjustment-clean-limit" type="number" min="5" max="80" value="30" />
+              </label>
+              <div class="actions">
+                <label class="check-row"><input type="checkbox" name="adjustment-clean-sources" value="yanzhao" checked />研招网</label>
+                <label class="check-row"><input type="checkbox" name="adjustment-clean-sources" value="muchong" checked />小木虫</label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="adjustment-clean-run-btn">抓取并清洗</button>
+                <button type="button" id="adjustment-clean-export-btn" class="muted">导出选中为 Markdown</button>
+              </div>
+            </form>
 
-        <div id="adjustment-clean-result" class="verify-panel hidden">
-          <h3>清洗结果</h3>
-          <p id="adjustment-clean-summary" class="subtitle"></p>
-          <div class="scan-filters">
-            <label>
-              来源筛选
-              <select id="adjustment-clean-source-filter">
-                <option value="">全部来源</option>
-                <option value="yanzhao">研招网</option>
-                <option value="muchong">小木虫</option>
-              </select>
-            </label>
-            <label>
-              年份筛选
-              <select id="adjustment-clean-year-filter">
-                <option value="">全部年份</option>
-              </select>
-            </label>
-            <label>
-              关键词筛选
-              <input id="adjustment-clean-keyword-filter" placeholder="例如：调剂 复试 外语 名额" />
-            </label>
-            <button type="button" id="adjustment-clean-filter-reset" class="muted">清空筛选</button>
+            <div id="adjustment-clean-result" class="verify-panel hidden">
+              <h3>清洗结果</h3>
+              <p id="adjustment-clean-summary" class="subtitle"></p>
+              <div class="scan-filters">
+                <label>
+                  来源筛选
+                  <select id="adjustment-clean-source-filter">
+                    <option value="">全部来源</option>
+                    <option value="yanzhao">研招网</option>
+                    <option value="muchong">小木虫</option>
+                  </select>
+                </label>
+                <label>
+                  年份筛选
+                  <select id="adjustment-clean-year-filter">
+                    <option value="">全部年份</option>
+                  </select>
+                </label>
+                <label>
+                  关键词筛选
+                  <input id="adjustment-clean-keyword-filter" placeholder="例如：调剂 复试 外语 名额" />
+                </label>
+                <button type="button" id="adjustment-clean-filter-reset" class="muted">清空筛选</button>
+              </div>
+              <div class="actions">
+                <button type="button" id="adjustment-clean-select-all" class="muted">全选</button>
+                <button type="button" id="adjustment-clean-invert" class="muted">反选</button>
+              </div>
+              <ul id="adjustment-clean-list" class="scan-list"></ul>
+              <div id="adjustment-clean-pager" class="pager"></div>
+            </div>
           </div>
-          <div class="actions">
-            <button type="button" id="adjustment-clean-select-all" class="muted">全选</button>
-            <button type="button" id="adjustment-clean-invert" class="muted">反选</button>
-          </div>
-          <ul id="adjustment-clean-list" class="scan-list"></ul>
-          <div id="adjustment-clean-pager" class="pager"></div>
+
+          <aside class="module-side">
+            <div class="side-panel" id="adjustment-clean-quick-panel">
+              <h3>固定 10 所院校（一键查询）</h3>
+              <p class="subtitle">保存常用院校后，点击“查询”即可按左侧当前清洗参数一键执行。</p>
+              <div class="form-grid">
+                <label>
+                  院校名称
+                  <input id="adjustmentCleanQuickSchoolName" placeholder="例如：四川轻化工大学" />
+                </label>
+                <label>
+                  专业/学院关键词（可选）
+                  <input id="adjustmentCleanQuickMajor" placeholder="例如：外语学院" />
+                </label>
+                <label>
+                  年份（可选）
+                  <input id="adjustmentCleanQuickYear" placeholder="例如：2026" />
+                </label>
+                <div class="actions inline-actions">
+                  <button type="button" id="adjustment-clean-quick-add-btn">加入固定院校</button>
+                  <button type="button" id="adjustment-clean-quick-cancel-btn" class="muted">取消修改</button>
+                  <button type="button" id="adjustment-clean-quick-sync-btn" class="muted">同步自调剂导航</button>
+                </div>
+              </div>
+              <p class="subtitle quick-editor-tip" id="adjustment-clean-quick-editor-tip">当前为新增模式。</p>
+              <ul id="adjustment-clean-quick-list"></ul>
+            </div>
+          </aside>
         </div>
       </section>
 

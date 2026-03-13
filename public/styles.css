@@ -193,6 +193,18 @@ textarea {
   gap: 8px;
 }
 
+.module-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.module-main,
+.module-side {
+  min-width: 0;
+}
+
 .auth-card {
   padding: 10px 14px;
 }
@@ -852,6 +864,10 @@ button.danger {
 @media (max-width: 760px) {
   .container {
     padding: 16px 10px 24px;
+  }
+
+  .module-split {
+    grid-template-columns: 1fr;
   }
 
   h1 {

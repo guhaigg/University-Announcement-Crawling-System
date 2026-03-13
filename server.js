@@ -400,7 +400,14 @@ async function ensureStorage() {
   await fsp.mkdir(OUTPUT_DIR, { recursive: true });
 
   if (!fs.existsSync(CONFIG_FILE)) {
-    await writeConfig({ tasks: [], manualPresets: [], quickRetestSchools: [], quickNewsSchools: [], quickAdjustmentSchools: [] });
+    await writeConfig({
+      tasks: [],
+      manualPresets: [],
+      quickRetestSchools: [],
+      quickNewsSchools: [],
+      quickAdjustmentSchools: [],
+      quickAdjustmentCleanSchools: []
+    });
   }
   if (!fs.existsSync(USERS_FILE)) {
     await writeUsers({ users: [] });
@@ -436,6 +443,9 @@ async function readConfig(retries = 2) {
       Array.isArray(parsed.quickNewsSchools) ? parsed.quickNewsSchools : Array.isArray(parsed.quickRetestSchools) ? parsed.quickRetestSchools : []
     ).map(normalizeQuickRetestSchoolRecord);
     const rawQuickAdjustmentSchools = (Array.isArray(parsed.quickAdjustmentSchools) ? parsed.quickAdjustmentSchools : []).map(normalizeQuickRetestSchoolRecord);
+    const rawQuickAdjustmentCleanSchools = (
+      Array.isArray(parsed.quickAdjustmentCleanSchools) ? parsed.quickAdjustmentCleanSchools : []
+    ).map(normalizeAdjustmentCleanQuickRecord);
     const manualPresets = [];
     const seen = new Set();
     for (const preset of rawPresets) {
@@ -463,12 +473,22 @@ async function readConfig(retries = 2) {
       quickAdjustmentSchools.push(school);
       if (quickAdjustmentSchools.length >= 10) break;
     }
+    const quickAdjustmentCleanSchools = [];
+    const quickAdjustmentCleanSeen = new Set();
+    for (const school of rawQuickAdjustmentCleanSchools) {
+      const key = buildAdjustmentCleanQuickDedupKey(school);
+      if (quickAdjustmentCleanSeen.has(key)) continue;
+      quickAdjustmentCleanSeen.add(key);
+      quickAdjustmentCleanSchools.push(school);
+      if (quickAdjustmentCleanSchools.length >= 10) break;
+    }
     return {
       tasks,
       manualPresets,
       quickRetestSchools: quickNewsSchools,
       quickNewsSchools,
-      quickAdjustmentSchools
+      quickAdjustmentSchools,
+      quickAdjustmentCleanSchools
     };
   } catch (error) {
     if (retries > 0) {
@@ -713,6 +733,20 @@ function normalizeQuickRetestSchoolRecord(recordLike) {
   };
 }
 
+function normalizeAdjustmentCleanQuickRecord(recordLike) {
+  const record = recordLike || {};
+  const schoolName = String(record.schoolName || '').trim();
+  const majorKeyword = String(record.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(record.targetYear || '');
+  return {
+    id: String(record.id || '').trim() || `clean_quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    schoolName,
+    majorKeyword,
+    targetYear,
+    savedAt: String(record.savedAt || nowIsoSafe())
+  };
+}
+
 function buildPresetDedupKey(presetLike) {
   const preset = normalizePresetRecord(presetLike);
   return normalizeMatchText(preset.schoolName || '');
@@ -725,6 +759,11 @@ function buildQuickRetestSchoolDedupKey(recordLike) {
     normalizeMatchText(record.collegeName || ''),
     record.includeCollegePages ? '1' : '0'
   ].join('::');
+}
+
+function buildAdjustmentCleanQuickDedupKey(recordLike) {
+  const record = normalizeAdjustmentCleanQuickRecord(recordLike);
+  return [normalizeMatchText(record.schoolName || ''), normalizeMatchText(record.majorKeyword || ''), record.targetYear || ''].join('::');
 }
 
 function upsertQuickSchoolRecords(currentList, record, limit = 10) {
@@ -752,10 +791,43 @@ function upsertQuickSchoolRecords(currentList, record, limit = 10) {
   return output.slice(0, limit);
 }
 
+function upsertAdjustmentCleanQuickRecords(currentList, record, limit = 10) {
+  const current = Array.isArray(currentList) ? currentList.map(normalizeAdjustmentCleanQuickRecord) : [];
+  const normalized = normalizeAdjustmentCleanQuickRecord(record);
+  const output = [];
+  const seen = new Set();
+  const push = (item) => {
+    const target = normalizeAdjustmentCleanQuickRecord(item);
+    if (!target.schoolName) return;
+    const key = buildAdjustmentCleanQuickDedupKey(target);
+    if (seen.has(key)) return;
+    seen.add(key);
+    output.push(target);
+  };
+  if (normalized.schoolName) {
+    if (!normalized.id) {
+      normalized.id = `clean_quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    push(normalized);
+  }
+  current
+    .filter((item) => item.id !== normalized.id)
+    .forEach((item) => push(item));
+  return output.slice(0, limit);
+}
+
 function mergeQuickSchoolRecords(currentList, incomingList, limit = 10) {
   let merged = Array.isArray(currentList) ? currentList.map(normalizeQuickRetestSchoolRecord) : [];
   for (const record of Array.isArray(incomingList) ? incomingList : []) {
     merged = upsertQuickSchoolRecords(merged, record, limit);
+  }
+  return merged.slice(0, limit);
+}
+
+function mergeAdjustmentCleanQuickRecords(currentList, incomingList, limit = 10) {
+  let merged = Array.isArray(currentList) ? currentList.map(normalizeAdjustmentCleanQuickRecord) : [];
+  for (const record of Array.isArray(incomingList) ? incomingList : []) {
+    merged = upsertAdjustmentCleanQuickRecords(merged, record, limit);
   }
   return merged.slice(0, limit);
 }
@@ -4664,6 +4736,66 @@ app.post('/api/adjustment-clean/export', async (req, res) => {
     res.json({ ok: true, ...output });
   } catch (error) {
     res.status(400).json({ error: error.message || '调剂数据导出失败' });
+  }
+});
+
+app.get('/api/adjustment-clean-quick-schools', async (_, res) => {
+  const config = await readConfig();
+  res.json({ schools: config.quickAdjustmentCleanSchools || [] });
+});
+
+app.post('/api/adjustment-clean-quick-schools', async (req, res) => {
+  const record = normalizeAdjustmentCleanQuickRecord(req.body || {});
+  if (!record.schoolName) {
+    return res.status(400).json({ error: '院校名称不能为空' });
+  }
+  const schools = await mutateConfig(async (config) => {
+    config.quickAdjustmentCleanSchools = upsertAdjustmentCleanQuickRecords(config.quickAdjustmentCleanSchools || [], record, 10);
+    return config.quickAdjustmentCleanSchools;
+  });
+  res.json({ ok: true, schools });
+});
+
+app.delete('/api/adjustment-clean-quick-schools/:id', async (req, res) => {
+  const id = String(req.params.id || '').trim();
+  try {
+    const schools = await mutateConfig(async (config) => {
+      const before = (config.quickAdjustmentCleanSchools || []).length;
+      config.quickAdjustmentCleanSchools = (config.quickAdjustmentCleanSchools || []).filter((x) => x.id !== id);
+      if (config.quickAdjustmentCleanSchools.length === before) {
+        throw createHttpError(404, '院校记录不存在');
+      }
+      return config.quickAdjustmentCleanSchools;
+    });
+    res.json({ ok: true, schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除固定院校失败' });
+  }
+});
+
+app.post('/api/adjustment-clean-quick-schools/sync', async (req, res) => {
+  try {
+    const result = await mutateConfig(async (config) => {
+      const source = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools : [];
+      if (!source.length) {
+        throw createHttpError(400, '调剂智能导航固定院校为空，无法同步');
+      }
+      const incoming = source.map((item) => ({
+        schoolName: item.schoolName || '',
+        majorKeyword: item.collegeName || '',
+        targetYear: '',
+        savedAt: nowIsoSafe()
+      }));
+      const before = Array.isArray(config.quickAdjustmentCleanSchools) ? config.quickAdjustmentCleanSchools.length : 0;
+      config.quickAdjustmentCleanSchools = mergeAdjustmentCleanQuickRecords(config.quickAdjustmentCleanSchools || [], incoming, 10);
+      return {
+        syncedCount: Math.max(0, config.quickAdjustmentCleanSchools.length - before),
+        schools: config.quickAdjustmentCleanSchools
+      };
+    });
+    res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '固定院校同步失败' });
   }
 });
 

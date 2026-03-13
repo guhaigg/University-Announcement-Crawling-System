@@ -117,6 +117,14 @@ const adjustmentCleanSelectAll = document.getElementById('adjustment-clean-selec
 const adjustmentCleanInvert = document.getElementById('adjustment-clean-invert');
 const adjustmentCleanList = document.getElementById('adjustment-clean-list');
 const adjustmentCleanPager = document.getElementById('adjustment-clean-pager');
+const adjustmentCleanQuickSchoolName = document.getElementById('adjustmentCleanQuickSchoolName');
+const adjustmentCleanQuickMajor = document.getElementById('adjustmentCleanQuickMajor');
+const adjustmentCleanQuickYear = document.getElementById('adjustmentCleanQuickYear');
+const adjustmentCleanQuickAddBtn = document.getElementById('adjustment-clean-quick-add-btn');
+const adjustmentCleanQuickCancelBtn = document.getElementById('adjustment-clean-quick-cancel-btn');
+const adjustmentCleanQuickSyncBtn = document.getElementById('adjustment-clean-quick-sync-btn');
+const adjustmentCleanQuickEditorTip = document.getElementById('adjustment-clean-quick-editor-tip');
+const adjustmentCleanQuickList = document.getElementById('adjustment-clean-quick-list');
 const newsQuickSchoolName = document.getElementById('newsQuickSchoolName');
 const newsQuickCollegeName = document.getElementById('newsQuickCollegeName');
 const newsQuickIncludeCollegePages = document.getElementById('newsQuickIncludeCollegePages');
@@ -142,10 +150,12 @@ let selectedFileNames = new Set();
 let adjustmentMatch = null;
 let newsQueryState = null;
 let adjustmentCleanState = null;
+let adjustmentCleanQuickSchools = [];
 let newsQuickSchools = [];
 let adjustmentQuickSchools = [];
 let editingNewsQuickId = '';
 let editingAdjustmentQuickId = '';
+let editingAdjustmentCleanQuickId = '';
 let activeModuleId = 'daily-module';
 let activeNewsQueryFocus = String(newsQueryFocus?.value || 'general') === 'retest' ? 'retest' : 'general';
 let currentUser = null;
@@ -717,6 +727,95 @@ function renderAdjustmentCleanResult(result) {
   rerenderAdjustmentClean(true);
 }
 
+function renderAdjustmentCleanQuickSchools() {
+  if (!adjustmentCleanQuickList) return;
+  if (!adjustmentCleanQuickSchools.length) {
+    adjustmentCleanQuickList.innerHTML = '<li class="empty">暂无固定院校（最多 10 所）</li>';
+    return;
+  }
+  adjustmentCleanQuickList.innerHTML = adjustmentCleanQuickSchools
+    .map((item) => {
+      const yearText = item.targetYear ? ` / ${item.targetYear}` : '';
+      const majorText = item.majorKeyword ? ` / ${item.majorKeyword}` : '';
+      const label = `${item.schoolName}${majorText}${yearText}`;
+      const editing = editingAdjustmentCleanQuickId && editingAdjustmentCleanQuickId === item.id;
+      return `<li class="${editing ? 'editing' : ''}">
+        <strong>${escapeHtml(label)}</strong>
+        ${editing ? '<span class="quick-editing-tag">编辑中</span>' : ''}
+        <button type="button" data-action="run-adjustment-clean-quick" data-id="${item.id}">查询</button>
+        <button type="button" data-action="apply-adjustment-clean-quick" data-id="${item.id}" class="muted">套用</button>
+        <button type="button" data-action="edit-adjustment-clean-quick" data-id="${item.id}" class="muted">修改</button>
+        <button type="button" data-action="delete-adjustment-clean-quick" data-id="${item.id}" class="danger">删除</button>
+      </li>`;
+    })
+    .join('');
+}
+
+async function loadAdjustmentCleanQuickSchools() {
+  const data = await api('/api/adjustment-clean-quick-schools');
+  adjustmentCleanQuickSchools = Array.isArray(data.schools) ? data.schools : [];
+  renderAdjustmentCleanQuickSchools();
+}
+
+function startAdjustmentCleanQuickEdit(item) {
+  if (!item) return;
+  editingAdjustmentCleanQuickId = item.id;
+  if (adjustmentCleanQuickSchoolName) adjustmentCleanQuickSchoolName.value = item.schoolName || '';
+  if (adjustmentCleanQuickMajor) adjustmentCleanQuickMajor.value = item.majorKeyword || '';
+  if (adjustmentCleanQuickYear) adjustmentCleanQuickYear.value = item.targetYear || '';
+  if (adjustmentCleanQuickAddBtn) adjustmentCleanQuickAddBtn.textContent = '保存修改';
+  if (adjustmentCleanQuickEditorTip) {
+    const label = `${item.schoolName || '未命名院校'}${item.majorKeyword ? ` / ${item.majorKeyword}` : ''}${item.targetYear ? ` / ${item.targetYear}` : ''}`;
+    adjustmentCleanQuickEditorTip.textContent = `当前正在修改：${label}`;
+  }
+  renderAdjustmentCleanQuickSchools();
+}
+
+function resetAdjustmentCleanQuickEditor() {
+  editingAdjustmentCleanQuickId = '';
+  if (adjustmentCleanQuickSchoolName) adjustmentCleanQuickSchoolName.value = '';
+  if (adjustmentCleanQuickMajor) adjustmentCleanQuickMajor.value = '';
+  if (adjustmentCleanQuickYear) adjustmentCleanQuickYear.value = '';
+  if (adjustmentCleanQuickAddBtn) adjustmentCleanQuickAddBtn.textContent = '加入固定院校';
+  if (adjustmentCleanQuickEditorTip) adjustmentCleanQuickEditorTip.textContent = '当前为新增模式。';
+  renderAdjustmentCleanQuickSchools();
+}
+
+function fillAdjustmentCleanFromQuick(item) {
+  if (!item) return;
+  if (adjustmentCleanSchool) adjustmentCleanSchool.value = item.schoolName || '';
+  if (adjustmentCleanMajor) adjustmentCleanMajor.value = item.majorKeyword || '';
+  if (adjustmentCleanYear) adjustmentCleanYear.value = item.targetYear || '';
+  switchModule('adjustment-clean-module');
+}
+
+async function runAdjustmentCleanQuickQuery(item) {
+  if (!item) return;
+  fillAdjustmentCleanFromQuick(item);
+  const payload = {
+    schoolName: String(item.schoolName || '').trim(),
+    majorKeyword: String(item.majorKeyword || '').trim(),
+    targetYear: String(item.targetYear || '').trim(),
+    keywords: String(adjustmentCleanKeywords?.value || '').trim(),
+    cleaningLevel: normalizeCleaningLevel(adjustmentCleanLevel?.value || 'standard'),
+    sources: getAdjustmentCleanSelectedSourcesFromForm(),
+    limit: Number(adjustmentCleanLimit?.value || 30)
+  };
+  try {
+    setButtonBusy(adjustmentCleanRunBtn, true, '查询中...');
+    const data = await api('/api/adjustment-clean/query', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    renderAdjustmentCleanResult(data.result);
+    showToast(`已完成：${item.schoolName} 调剂数据清洗`);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    setButtonBusy(adjustmentCleanRunBtn, false);
+  }
+}
+
 function renderNewsQuickSchools() {
   if (!newsQuickList) return;
   if (!newsQuickSchools.length) {
@@ -786,6 +885,17 @@ async function syncQuickSchools(sourceType) {
   await Promise.all([loadNewsQuickSchools(), loadAdjustmentQuickSchools()]);
   const synced = Number(data.syncedCount || 0);
   showToast(synced > 0 ? `已同步 ${synced} 所院校到${targetLabel}` : `目标模块已是最新，无需同步`);
+}
+
+async function syncAdjustmentCleanQuickSchools() {
+  if (!adjustmentQuickSchools.length) {
+    showToast('调剂智能导航固定院校为空，无法同步', true);
+    return;
+  }
+  const data = await api('/api/adjustment-clean-quick-schools/sync', { method: 'POST' });
+  await loadAdjustmentCleanQuickSchools();
+  const synced = Number(data.syncedCount || 0);
+  showToast(synced > 0 ? `已同步 ${synced} 所院校到调剂数据清洗` : '目标模块已是最新，无需同步');
 }
 
 function fillAdjustmentQueryFromQuick(item) {
@@ -2098,6 +2208,103 @@ if (adjustmentQuickList) {
   });
 }
 
+if (adjustmentCleanQuickAddBtn) {
+  adjustmentCleanQuickAddBtn.addEventListener('click', async () => {
+    const schoolName = String(adjustmentCleanQuickSchoolName?.value || '').trim();
+    const majorKeyword = String(adjustmentCleanQuickMajor?.value || '').trim();
+    const targetYear = String(adjustmentCleanQuickYear?.value || '').trim();
+    const isEditing = Boolean(editingAdjustmentCleanQuickId);
+    if (!schoolName) {
+      showToast('请先填写院校名称', true);
+      return;
+    }
+    try {
+      setButtonBusy(adjustmentCleanQuickAddBtn, true, isEditing ? '保存中...' : '添加中...');
+      await api('/api/adjustment-clean-quick-schools', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: editingAdjustmentCleanQuickId || undefined,
+          schoolName,
+          majorKeyword,
+          targetYear
+        })
+      });
+      await loadAdjustmentCleanQuickSchools();
+      resetAdjustmentCleanQuickEditor();
+      showToast(isEditing ? '固定院校已更新' : '已加入固定院校');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentCleanQuickAddBtn, false);
+    }
+  });
+}
+
+if (adjustmentCleanQuickCancelBtn) {
+  adjustmentCleanQuickCancelBtn.addEventListener('click', () => {
+    if (
+      !editingAdjustmentCleanQuickId &&
+      !adjustmentCleanQuickSchoolName?.value?.trim() &&
+      !adjustmentCleanQuickMajor?.value?.trim() &&
+      !adjustmentCleanQuickYear?.value?.trim()
+    ) {
+      return;
+    }
+    resetAdjustmentCleanQuickEditor();
+    showToast('已取消修改');
+  });
+}
+
+if (adjustmentCleanQuickSyncBtn) {
+  adjustmentCleanQuickSyncBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(adjustmentCleanQuickSyncBtn, true, '同步中...');
+      await syncAdjustmentCleanQuickSchools();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentCleanQuickSyncBtn, false);
+    }
+  });
+}
+
+if (adjustmentCleanQuickList) {
+  adjustmentCleanQuickList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const item = adjustmentCleanQuickSchools.find((x) => x.id === btn.dataset.id);
+    if (!item) return;
+    const action = btn.dataset.action;
+    if (action === 'apply-adjustment-clean-quick') {
+      fillAdjustmentCleanFromQuick(item);
+      showToast('已套用到调剂数据清洗表单');
+      return;
+    }
+    if (action === 'run-adjustment-clean-quick') {
+      await runAdjustmentCleanQuickQuery(item);
+      return;
+    }
+    if (action === 'delete-adjustment-clean-quick') {
+      try {
+        setButtonBusy(btn, true, '删除中...');
+        await api(`/api/adjustment-clean-quick-schools/${item.id}`, { method: 'DELETE' });
+        await loadAdjustmentCleanQuickSchools();
+        if (editingAdjustmentCleanQuickId === item.id) resetAdjustmentCleanQuickEditor();
+        showToast('已删除固定院校');
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        setButtonBusy(btn, false);
+      }
+      return;
+    }
+    if (action === 'edit-adjustment-clean-quick') {
+      startAdjustmentCleanQuickEdit(item);
+      showToast('已进入修改模式');
+    }
+  });
+}
+
 if (newsQueryDayFilter) {
   newsQueryDayFilter.addEventListener('change', () => {
     rerenderNewsQueryByFilters(true);
@@ -2424,7 +2631,7 @@ if (loginForm) {
       });
       updateAuthInfo(data.user || { username });
       closeAuthModal();
-      await Promise.all([loadTasks(), loadFiles(), loadManualPresets(), loadNewsQuickSchools(), loadAdjustmentQuickSchools()]);
+      await Promise.all([loadTasks(), loadFiles(), loadManualPresets(), loadNewsQuickSchools(), loadAdjustmentQuickSchools(), loadAdjustmentCleanQuickSchools()]);
       showToast(`欢迎回来，${(data.user && data.user.username) || username}`);
     } catch (error) {
       if (loginError) loginError.textContent = error.message || '登录失败';
@@ -2897,7 +3104,7 @@ async function init() {
   if (!loggedIn) {
     return;
   }
-  await Promise.all([loadTasks(), loadFiles(), loadManualPresets(), loadNewsQuickSchools(), loadAdjustmentQuickSchools()]);
+  await Promise.all([loadTasks(), loadFiles(), loadManualPresets(), loadNewsQuickSchools(), loadAdjustmentQuickSchools(), loadAdjustmentCleanQuickSchools()]);
 }
 
 init().catch((error) => {
