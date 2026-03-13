@@ -55,6 +55,7 @@ const KEYWORD_SYNONYM_MAP = {
 const scheduledJobs = new Map();
 const runningTasks = new Set();
 const sessions = new Map();
+let configMutationQueue = Promise.resolve();
 const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '1mb' }));
@@ -315,9 +316,30 @@ async function readConfig(retries = 2) {
 }
 
 async function writeConfig(config) {
-  const tmpFile = `${CONFIG_FILE}.${process.pid}.${Date.now()}.tmp`;
+  const tmpFile = `${CONFIG_FILE}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   await fsp.writeFile(tmpFile, JSON.stringify(config, null, 2), 'utf8');
   await fsp.rename(tmpFile, CONFIG_FILE);
+}
+
+function runInConfigMutationQueue(job) {
+  const run = configMutationQueue.then(job, job);
+  configMutationQueue = run.catch(() => {});
+  return run;
+}
+
+async function mutateConfig(mutator) {
+  return runInConfigMutationQueue(async () => {
+    const config = await readConfig();
+    const result = await mutator(config);
+    await writeConfig(config);
+    return result;
+  });
+}
+
+function createHttpError(status, message) {
+  const error = new Error(message);
+  error.status = Number(status) || 500;
+  return error;
 }
 
 function sanitizeFilename(input) {
@@ -2877,22 +2899,21 @@ function buildManualPreset(taskLike) {
 async function saveManualPreset(taskLike) {
   const preset = buildManualPreset(taskLike);
   if (!preset) return [];
-
-  const config = await readConfig();
-  const current = (Array.isArray(config.manualPresets) ? config.manualPresets : []).map(normalizePresetRecord);
-  const merged = [];
-  const seen = new Set();
-  for (const item of [preset, ...current]) {
-    const normalized = normalizePresetRecord(item);
-    const key = buildPresetDedupKey(normalized);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(normalized);
-    if (merged.length >= MANUAL_PRESET_LIMIT) break;
-  }
-  config.manualPresets = merged;
-  await writeConfig(config);
-  return merged;
+  return mutateConfig(async (config) => {
+    const current = (Array.isArray(config.manualPresets) ? config.manualPresets : []).map(normalizePresetRecord);
+    const merged = [];
+    const seen = new Set();
+    for (const item of [preset, ...current]) {
+      const normalized = normalizePresetRecord(item);
+      const key = buildPresetDedupKey(normalized);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(normalized);
+      if (merged.length >= MANUAL_PRESET_LIMIT) break;
+    }
+    config.manualPresets = merged;
+    return merged;
+  });
 }
 
 function buildMarkdownWithContents(task, pageRefs, details, source) {
@@ -3203,29 +3224,38 @@ async function runTask(taskId, source = 'manual') {
 
     const task = config.tasks[idx];
     const result = await executeCrawl(task, source);
-
-    task.lastRunAt = nowIsoSafe();
-    task.lastError = '';
-    task.lastResultFile = result.fileName;
-    task.lastResultFiles = Array.isArray(result.fileNames) ? result.fileNames : result.fileName ? [result.fileName] : [];
-    task.lastMatchedCount = result.matchedCount;
-    task.updatedAt = nowIsoSafe();
-
-    config.tasks[idx] = task;
-    await writeConfig(config);
+    const updatedTask = await mutateConfig(async (latestConfig) => {
+      const latestIdx = latestConfig.tasks.findIndex((t) => t.id === taskId);
+      if (latestIdx < 0) {
+        throw new Error('任务不存在');
+      }
+      const latestTask = latestConfig.tasks[latestIdx];
+      latestTask.lastRunAt = nowIsoSafe();
+      latestTask.lastError = '';
+      latestTask.lastResultFile = result.fileName;
+      latestTask.lastResultFiles = Array.isArray(result.fileNames) ? result.fileNames : result.fileName ? [result.fileName] : [];
+      latestTask.lastMatchedCount = result.matchedCount;
+      latestTask.updatedAt = nowIsoSafe();
+      latestConfig.tasks[latestIdx] = latestTask;
+      return latestTask;
+    });
 
     return {
-      task,
+      task: updatedTask,
       ...result
     };
   } catch (error) {
-    const config = await readConfig();
-    const idx = config.tasks.findIndex((t) => t.id === taskId);
-    if (idx >= 0) {
-      config.tasks[idx].lastRunAt = nowIsoSafe();
-      config.tasks[idx].lastError = error.message || '抓取失败';
-      config.tasks[idx].updatedAt = nowIsoSafe();
-      await writeConfig(config);
+    try {
+      await mutateConfig(async (config) => {
+        const idx = config.tasks.findIndex((t) => t.id === taskId);
+        if (idx >= 0) {
+          config.tasks[idx].lastRunAt = nowIsoSafe();
+          config.tasks[idx].lastError = error.message || '抓取失败';
+          config.tasks[idx].updatedAt = nowIsoSafe();
+        }
+      });
+    } catch (writeError) {
+      console.error(`[task] failed to persist task error for ${taskId}:`, writeError.message || writeError);
     }
     throw error;
   } finally {
@@ -3373,94 +3403,100 @@ app.post('/api/tasks', async (req, res) => {
     return res.status(400).json({ error: 'scheduleTime 格式必须为 HH:mm，例如 08:30' });
   }
 
-  const config = await readConfig();
+  try {
+    const task = await mutateConfig(async (config) => {
+      let nextTask;
+      if (body.id) {
+        const idx = config.tasks.findIndex((t) => t.id === body.id);
+        if (idx < 0) {
+          throw createHttpError(404, '任务不存在，无法更新');
+        }
 
-  let task;
-  if (body.id) {
-    const idx = config.tasks.findIndex((t) => t.id === body.id);
-    if (idx < 0) {
-      return res.status(404).json({ error: '任务不存在，无法更新' });
-    }
-
-    const current = config.tasks[idx];
-    task = {
-      ...current,
-      schoolName,
-      homepageUrl,
-      announcementUrl,
-      announcementUrls,
-      scheduleTime,
-      enabled,
-      keywords,
-      markdownOutputMode,
-      crawlMode,
-      includeCollegePages,
-      collegeUrls,
-      updatedAt: nowIsoSafe()
-    };
-    config.tasks[idx] = task;
-  } else {
-    task = {
-      id: `task_${Date.now()}`,
-      schoolName,
-      homepageUrl,
-      announcementUrl,
-      announcementUrls,
-      scheduleTime,
-      enabled,
-      keywords,
-      markdownOutputMode,
-      crawlMode,
-      includeCollegePages,
-      collegeUrls,
-      createdAt: nowIsoSafe(),
-      updatedAt: nowIsoSafe(),
-      lastRunAt: '',
-      lastError: '',
-      lastResultFile: '',
-      lastResultFiles: [],
-      lastMatchedCount: 0
-    };
-    config.tasks.push(task);
+        const current = config.tasks[idx];
+        nextTask = {
+          ...current,
+          schoolName,
+          homepageUrl,
+          announcementUrl,
+          announcementUrls,
+          scheduleTime,
+          enabled,
+          keywords,
+          markdownOutputMode,
+          crawlMode,
+          includeCollegePages,
+          collegeUrls,
+          updatedAt: nowIsoSafe()
+        };
+        config.tasks[idx] = nextTask;
+      } else {
+        nextTask = {
+          id: `task_${Date.now()}`,
+          schoolName,
+          homepageUrl,
+          announcementUrl,
+          announcementUrls,
+          scheduleTime,
+          enabled,
+          keywords,
+          markdownOutputMode,
+          crawlMode,
+          includeCollegePages,
+          collegeUrls,
+          createdAt: nowIsoSafe(),
+          updatedAt: nowIsoSafe(),
+          lastRunAt: '',
+          lastError: '',
+          lastResultFile: '',
+          lastResultFiles: [],
+          lastMatchedCount: 0
+        };
+        config.tasks.push(nextTask);
+      }
+      return nextTask;
+    });
+    scheduleSingleTask(task);
+    res.json({ task });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '任务保存失败' });
   }
-
-  await writeConfig(config);
-  scheduleSingleTask(task);
-
-  res.json({ task });
 });
 
 app.post('/api/tasks/:id/toggle', async (req, res) => {
   const id = req.params.id;
   const enabled = Boolean((req.body || {}).enabled);
-  const config = await readConfig();
-  const idx = config.tasks.findIndex((t) => t.id === id);
-
-  if (idx < 0) {
-    return res.status(404).json({ error: '任务不存在' });
+  try {
+    const task = await mutateConfig(async (config) => {
+      const idx = config.tasks.findIndex((t) => t.id === id);
+      if (idx < 0) {
+        throw createHttpError(404, '任务不存在');
+      }
+      config.tasks[idx].enabled = enabled;
+      config.tasks[idx].updatedAt = nowIsoSafe();
+      return config.tasks[idx];
+    });
+    scheduleSingleTask(task);
+    res.json({ task });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '任务更新失败' });
   }
-
-  config.tasks[idx].enabled = enabled;
-  config.tasks[idx].updatedAt = nowIsoSafe();
-  await writeConfig(config);
-
-  scheduleSingleTask(config.tasks[idx]);
-  res.json({ task: config.tasks[idx] });
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
   const id = req.params.id;
-  const config = await readConfig();
-  const before = config.tasks.length;
-
-  config.tasks = config.tasks.filter((t) => t.id !== id);
-  if (config.tasks.length === before) {
-    return res.status(404).json({ error: '任务不存在' });
+  try {
+    await mutateConfig(async (config) => {
+      const before = config.tasks.length;
+      config.tasks = config.tasks.filter((t) => t.id !== id);
+      if (config.tasks.length === before) {
+        throw createHttpError(404, '任务不存在');
+      }
+    });
+    unscheduleTask(id);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '任务删除失败' });
   }
-
-  await writeConfig(config);
-  unscheduleTask(id);
-  res.json({ ok: true });
 });
 
 app.post('/api/tasks/:id/scan', async (req, res) => {
@@ -3493,8 +3529,8 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
     return res.status(404).json({ error: '任务不存在' });
   }
 
+  const task = config.tasks[idx];
   try {
-    const task = config.tasks[idx];
     const markdownOutputMode = normalizeMarkdownOutputMode(body.markdownOutputMode || task.markdownOutputMode);
     const fallbackUsedUrls = usedAnnouncementUrls.length ? usedAnnouncementUrls : task.announcementUrls || [];
     const result = await crawlSelectedNotices(
@@ -3505,22 +3541,36 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
       fallbackUsedUrls
     );
 
-    task.lastRunAt = nowIsoSafe();
-    task.lastError = '';
-    task.lastResultFile = result.fileName;
-    task.lastResultFiles = Array.isArray(result.fileNames) ? result.fileNames : result.fileName ? [result.fileName] : [];
-    task.lastMatchedCount = result.matchedCount;
-    task.updatedAt = nowIsoSafe();
-    config.tasks[idx] = task;
-    await writeConfig(config);
+    const updatedTask = await mutateConfig(async (latestConfig) => {
+      const latestIdx = latestConfig.tasks.findIndex((t) => t.id === id);
+      if (latestIdx < 0) {
+        throw createHttpError(404, '任务不存在');
+      }
+      const latestTask = latestConfig.tasks[latestIdx];
+      latestTask.lastRunAt = nowIsoSafe();
+      latestTask.lastError = '';
+      latestTask.lastResultFile = result.fileName;
+      latestTask.lastResultFiles = Array.isArray(result.fileNames) ? result.fileNames : result.fileName ? [result.fileName] : [];
+      latestTask.lastMatchedCount = result.matchedCount;
+      latestTask.updatedAt = nowIsoSafe();
+      latestConfig.tasks[latestIdx] = latestTask;
+      return latestTask;
+    });
 
-    res.json({ ok: true, result, task });
+    res.json({ ok: true, result, task: updatedTask });
   } catch (error) {
-    config.tasks[idx].lastRunAt = nowIsoSafe();
-    config.tasks[idx].lastError = error.message || '抓取失败';
-    config.tasks[idx].updatedAt = nowIsoSafe();
-    await writeConfig(config);
-    res.status(400).json({ error: error.message || '确认爬取失败' });
+    try {
+      await mutateConfig(async (latestConfig) => {
+        const latestIdx = latestConfig.tasks.findIndex((t) => t.id === id);
+        if (latestIdx < 0) return;
+        latestConfig.tasks[latestIdx].lastRunAt = nowIsoSafe();
+        latestConfig.tasks[latestIdx].lastError = error.message || '抓取失败';
+        latestConfig.tasks[latestIdx].updatedAt = nowIsoSafe();
+      });
+    } catch (writeError) {
+      console.error(`[task] failed to persist confirm error for ${id}:`, writeError.message || writeError);
+    }
+    res.status(error.status || 400).json({ error: error.message || '确认爬取失败' });
   }
 });
 
@@ -3767,12 +3817,13 @@ app.post('/api/news-quick-schools', async (req, res) => {
   if (!school.schoolName) {
     return res.status(400).json({ error: '院校名称不能为空' });
   }
-  const config = await readConfig();
-  const next = upsertQuickSchoolRecords(config.quickNewsSchools || [], school, 10);
-  config.quickNewsSchools = next;
-  config.quickRetestSchools = next;
-  await writeConfig(config);
-  res.json({ ok: true, schools: config.quickNewsSchools });
+  const schools = await mutateConfig(async (config) => {
+    const next = upsertQuickSchoolRecords(config.quickNewsSchools || [], school, 10);
+    config.quickNewsSchools = next;
+    config.quickRetestSchools = next;
+    return config.quickNewsSchools;
+  });
+  res.json({ ok: true, schools });
 });
 
 app.post('/api/news-quick-schools/delete-many', async (req, res) => {
@@ -3780,44 +3831,61 @@ app.post('/api/news-quick-schools/delete-many', async (req, res) => {
   if (!ids.length) {
     return res.status(400).json({ error: '请提供要删除的院校 ID 列表' });
   }
-  const config = await readConfig();
-  const before = (config.quickNewsSchools || []).length;
-  config.quickNewsSchools = (config.quickNewsSchools || []).filter((x) => !ids.includes(x.id));
-  config.quickRetestSchools = config.quickNewsSchools;
-  if (config.quickNewsSchools.length === before) {
-    return res.status(404).json({ error: '未找到可删除的院校记录' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const before = (config.quickNewsSchools || []).length;
+      config.quickNewsSchools = (config.quickNewsSchools || []).filter((x) => !ids.includes(x.id));
+      config.quickRetestSchools = config.quickNewsSchools;
+      if (config.quickNewsSchools.length === before) {
+        throw createHttpError(404, '未找到可删除的院校记录');
+      }
+      return {
+        deleted: before - config.quickNewsSchools.length,
+        schools: config.quickNewsSchools
+      };
+    });
+    res.json({ ok: true, deleted: result.deleted, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除固定院校失败' });
   }
-  await writeConfig(config);
-  res.json({ ok: true, deleted: before - config.quickNewsSchools.length, schools: config.quickNewsSchools });
 });
 
 app.delete('/api/news-quick-schools/:id', async (req, res) => {
   const id = String(req.params.id || '').trim();
-  const config = await readConfig();
-  const before = (config.quickNewsSchools || []).length;
-  config.quickNewsSchools = (config.quickNewsSchools || []).filter((x) => x.id !== id);
-  config.quickRetestSchools = config.quickNewsSchools;
-  if (config.quickNewsSchools.length === before) {
-    return res.status(404).json({ error: '院校记录不存在' });
+  try {
+    const schools = await mutateConfig(async (config) => {
+      const before = (config.quickNewsSchools || []).length;
+      config.quickNewsSchools = (config.quickNewsSchools || []).filter((x) => x.id !== id);
+      config.quickRetestSchools = config.quickNewsSchools;
+      if (config.quickNewsSchools.length === before) {
+        throw createHttpError(404, '院校记录不存在');
+      }
+      return config.quickNewsSchools;
+    });
+    res.json({ ok: true, schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除固定院校失败' });
   }
-  await writeConfig(config);
-  res.json({ ok: true, schools: config.quickNewsSchools });
 });
 
 app.post('/api/news-quick-schools/sync', async (req, res) => {
-  const config = await readConfig();
-  const source = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools : [];
-  if (!source.length) {
-    return res.status(400).json({ error: '当前固定院校列表为空，无法同步' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const source = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools : [];
+      if (!source.length) {
+        throw createHttpError(400, '当前固定院校列表为空，无法同步');
+      }
+      const before = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools.length : 0;
+      config.quickAdjustmentSchools = mergeQuickSchoolRecords(config.quickAdjustmentSchools || [], source, 10);
+      return {
+        syncedCount: Math.max(0, config.quickAdjustmentSchools.length - before),
+        schools: config.quickAdjustmentSchools
+      };
+    });
+    res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '固定院校同步失败' });
   }
-  const before = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools.length : 0;
-  config.quickAdjustmentSchools = mergeQuickSchoolRecords(config.quickAdjustmentSchools || [], source, 10);
-  await writeConfig(config);
-  res.json({
-    ok: true,
-    syncedCount: Math.max(0, config.quickAdjustmentSchools.length - before),
-    schools: config.quickAdjustmentSchools
-  });
 });
 
 app.post('/api/graduate-news-batch', async (req, res) => {
@@ -3848,10 +3916,11 @@ app.post('/api/adjustment-quick-schools', async (req, res) => {
   if (!school.schoolName) {
     return res.status(400).json({ error: '院校名称不能为空' });
   }
-  const config = await readConfig();
-  config.quickAdjustmentSchools = upsertQuickSchoolRecords(config.quickAdjustmentSchools || [], school, 10);
-  await writeConfig(config);
-  res.json({ ok: true, schools: config.quickAdjustmentSchools });
+  const schools = await mutateConfig(async (config) => {
+    config.quickAdjustmentSchools = upsertQuickSchoolRecords(config.quickAdjustmentSchools || [], school, 10);
+    return config.quickAdjustmentSchools;
+  });
+  res.json({ ok: true, schools });
 });
 
 app.post('/api/adjustment-quick-schools/delete-many', async (req, res) => {
@@ -3859,43 +3928,60 @@ app.post('/api/adjustment-quick-schools/delete-many', async (req, res) => {
   if (!ids.length) {
     return res.status(400).json({ error: '请提供要删除的院校 ID 列表' });
   }
-  const config = await readConfig();
-  const before = (config.quickAdjustmentSchools || []).length;
-  config.quickAdjustmentSchools = (config.quickAdjustmentSchools || []).filter((x) => !ids.includes(x.id));
-  if (config.quickAdjustmentSchools.length === before) {
-    return res.status(404).json({ error: '未找到可删除的院校记录' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const before = (config.quickAdjustmentSchools || []).length;
+      config.quickAdjustmentSchools = (config.quickAdjustmentSchools || []).filter((x) => !ids.includes(x.id));
+      if (config.quickAdjustmentSchools.length === before) {
+        throw createHttpError(404, '未找到可删除的院校记录');
+      }
+      return {
+        deleted: before - config.quickAdjustmentSchools.length,
+        schools: config.quickAdjustmentSchools
+      };
+    });
+    res.json({ ok: true, deleted: result.deleted, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除固定院校失败' });
   }
-  await writeConfig(config);
-  res.json({ ok: true, deleted: before - config.quickAdjustmentSchools.length, schools: config.quickAdjustmentSchools });
 });
 
 app.delete('/api/adjustment-quick-schools/:id', async (req, res) => {
   const id = String(req.params.id || '').trim();
-  const config = await readConfig();
-  const before = (config.quickAdjustmentSchools || []).length;
-  config.quickAdjustmentSchools = (config.quickAdjustmentSchools || []).filter((x) => x.id !== id);
-  if (config.quickAdjustmentSchools.length === before) {
-    return res.status(404).json({ error: '院校记录不存在' });
+  try {
+    const schools = await mutateConfig(async (config) => {
+      const before = (config.quickAdjustmentSchools || []).length;
+      config.quickAdjustmentSchools = (config.quickAdjustmentSchools || []).filter((x) => x.id !== id);
+      if (config.quickAdjustmentSchools.length === before) {
+        throw createHttpError(404, '院校记录不存在');
+      }
+      return config.quickAdjustmentSchools;
+    });
+    res.json({ ok: true, schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除固定院校失败' });
   }
-  await writeConfig(config);
-  res.json({ ok: true, schools: config.quickAdjustmentSchools });
 });
 
 app.post('/api/adjustment-quick-schools/sync', async (req, res) => {
-  const config = await readConfig();
-  const source = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools : [];
-  if (!source.length) {
-    return res.status(400).json({ error: '当前固定院校列表为空，无法同步' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const source = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools : [];
+      if (!source.length) {
+        throw createHttpError(400, '当前固定院校列表为空，无法同步');
+      }
+      const before = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools.length : 0;
+      config.quickNewsSchools = mergeQuickSchoolRecords(config.quickNewsSchools || [], source, 10);
+      config.quickRetestSchools = config.quickNewsSchools;
+      return {
+        syncedCount: Math.max(0, config.quickNewsSchools.length - before),
+        schools: config.quickNewsSchools
+      };
+    });
+    res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '固定院校同步失败' });
   }
-  const before = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools.length : 0;
-  config.quickNewsSchools = mergeQuickSchoolRecords(config.quickNewsSchools || [], source, 10);
-  config.quickRetestSchools = config.quickNewsSchools;
-  await writeConfig(config);
-  res.json({
-    ok: true,
-    syncedCount: Math.max(0, config.quickNewsSchools.length - before),
-    schools: config.quickNewsSchools
-  });
 });
 
 app.post('/api/graduate-assistant-batch', async (req, res) => {
@@ -3987,51 +4073,57 @@ app.get('/api/manual-presets', async (_, res) => {
 
 app.post('/api/manual-presets/sync-news', async (req, res) => {
   const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
-  const config = await readConfig();
-  const source = Array.isArray(config.manualPresets) ? config.manualPresets.map(normalizePresetRecord) : [];
-  const selected = ids.length ? source.filter((item) => ids.includes(item.id)) : source;
-  if (!selected.length) {
-    return res.status(400).json({ error: ids.length ? '未找到可同步的院校记录' : '最近十所院校为空，无法同步' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const source = Array.isArray(config.manualPresets) ? config.manualPresets.map(normalizePresetRecord) : [];
+      const selected = ids.length ? source.filter((item) => ids.includes(item.id)) : source;
+      if (!selected.length) {
+        throw createHttpError(400, ids.length ? '未找到可同步的院校记录' : '最近十所院校为空，无法同步');
+      }
+      const incoming = selected.map((item) => ({
+        schoolName: item.schoolName,
+        collegeName: item.collegeName || '',
+        includeCollegePages: item.includeCollegePages !== false
+      }));
+      const before = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools.length : 0;
+      config.quickNewsSchools = mergeQuickSchoolRecords(config.quickNewsSchools || [], incoming, 10);
+      config.quickRetestSchools = config.quickNewsSchools;
+      return {
+        syncedCount: Math.max(0, config.quickNewsSchools.length - before),
+        schools: config.quickNewsSchools
+      };
+    });
+    res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '院校同步失败' });
   }
-
-  const incoming = selected.map((item) => ({
-    schoolName: item.schoolName,
-    collegeName: item.collegeName || '',
-    includeCollegePages: item.includeCollegePages !== false
-  }));
-  const before = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools.length : 0;
-  config.quickNewsSchools = mergeQuickSchoolRecords(config.quickNewsSchools || [], incoming, 10);
-  config.quickRetestSchools = config.quickNewsSchools;
-  await writeConfig(config);
-  res.json({
-    ok: true,
-    syncedCount: Math.max(0, config.quickNewsSchools.length - before),
-    schools: config.quickNewsSchools
-  });
 });
 
 app.post('/api/manual-presets/sync-adjustment', async (req, res) => {
   const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
-  const config = await readConfig();
-  const source = Array.isArray(config.manualPresets) ? config.manualPresets.map(normalizePresetRecord) : [];
-  const selected = ids.length ? source.filter((item) => ids.includes(item.id)) : source;
-  if (!selected.length) {
-    return res.status(400).json({ error: ids.length ? '未找到可同步的院校记录' : '最近十所院校为空，无法同步' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const source = Array.isArray(config.manualPresets) ? config.manualPresets.map(normalizePresetRecord) : [];
+      const selected = ids.length ? source.filter((item) => ids.includes(item.id)) : source;
+      if (!selected.length) {
+        throw createHttpError(400, ids.length ? '未找到可同步的院校记录' : '最近十所院校为空，无法同步');
+      }
+      const incoming = selected.map((item) => ({
+        schoolName: item.schoolName,
+        collegeName: item.collegeName || '',
+        includeCollegePages: item.includeCollegePages !== false
+      }));
+      const before = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools.length : 0;
+      config.quickAdjustmentSchools = mergeQuickSchoolRecords(config.quickAdjustmentSchools || [], incoming, 10);
+      return {
+        syncedCount: Math.max(0, config.quickAdjustmentSchools.length - before),
+        schools: config.quickAdjustmentSchools
+      };
+    });
+    res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '院校同步失败' });
   }
-
-  const incoming = selected.map((item) => ({
-    schoolName: item.schoolName,
-    collegeName: item.collegeName || '',
-    includeCollegePages: item.includeCollegePages !== false
-  }));
-  const before = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools.length : 0;
-  config.quickAdjustmentSchools = mergeQuickSchoolRecords(config.quickAdjustmentSchools || [], incoming, 10);
-  await writeConfig(config);
-  res.json({
-    ok: true,
-    syncedCount: Math.max(0, config.quickAdjustmentSchools.length - before),
-    schools: config.quickAdjustmentSchools
-  });
 });
 
 app.post('/api/manual-presets/delete-many', async (req, res) => {
@@ -4039,27 +4131,36 @@ app.post('/api/manual-presets/delete-many', async (req, res) => {
   if (!ids.length) {
     return res.status(400).json({ error: '请提供要删除的院校记录 ID 列表' });
   }
-
-  const config = await readConfig();
-  const before = (config.manualPresets || []).length;
-  config.manualPresets = (config.manualPresets || []).filter((x) => !ids.includes(x.id));
-  if (config.manualPresets.length === before) {
-    return res.status(404).json({ error: '未找到可删除的院校记录' });
+  try {
+    const result = await mutateConfig(async (config) => {
+      const before = (config.manualPresets || []).length;
+      config.manualPresets = (config.manualPresets || []).filter((x) => !ids.includes(x.id));
+      if (config.manualPresets.length === before) {
+        throw createHttpError(404, '未找到可删除的院校记录');
+      }
+      return { deleted: before - config.manualPresets.length, presets: config.manualPresets };
+    });
+    res.json({ ok: true, deleted: result.deleted, presets: result.presets });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除院校记录失败' });
   }
-  await writeConfig(config);
-  res.json({ ok: true, deleted: before - config.manualPresets.length, presets: config.manualPresets });
 });
 
 app.delete('/api/manual-presets/:id', async (req, res) => {
   const id = req.params.id;
-  const config = await readConfig();
-  const before = (config.manualPresets || []).length;
-  config.manualPresets = (config.manualPresets || []).filter((x) => x.id !== id);
-  if (config.manualPresets.length === before) {
-    return res.status(404).json({ error: '格式不存在' });
+  try {
+    const presets = await mutateConfig(async (config) => {
+      const before = (config.manualPresets || []).length;
+      config.manualPresets = (config.manualPresets || []).filter((x) => x.id !== id);
+      if (config.manualPresets.length === before) {
+        throw createHttpError(404, '格式不存在');
+      }
+      return config.manualPresets;
+    });
+    res.json({ ok: true, presets });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || '删除院校记录失败' });
   }
-  await writeConfig(config);
-  res.json({ ok: true, presets: config.manualPresets });
 });
 
 app.get('/api/files', async (_, res) => {
