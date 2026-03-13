@@ -409,6 +409,29 @@
           <ul id="adjustment-major-test-list" class="scan-list"></ul>
           <div id="adjustment-major-test-pager" class="pager"></div>
         </div>
+
+        <div id="adjustment-major-cache-panel" class="verify-panel">
+          <h3>缓存管理</h3>
+          <p id="adjustment-major-cache-summary" class="subtitle">正在读取缓存状态...</p>
+          <div class="scan-filters">
+            <label>
+              专业缓存筛选
+              <select id="adjustment-major-cache-major-filter">
+                <option value="">全部专业</option>
+              </select>
+            </label>
+            <label>
+              保留最近 N 次
+              <input id="adjustment-major-cache-keep-count" type="number" min="1" max="50" value="5" />
+            </label>
+            <button type="button" id="adjustment-major-cache-refresh-btn" class="muted">刷新缓存列表</button>
+            <button type="button" id="adjustment-major-cache-prune-btn" class="muted">执行保留</button>
+            <button type="button" id="adjustment-major-cache-clear-major-btn" class="danger">清空当前专业</button>
+            <button type="button" id="adjustment-major-cache-clear-all-btn" class="danger">清空全部缓存</button>
+          </div>
+          <ul id="adjustment-major-cache-list" class="scan-list"></ul>
+          <div id="adjustment-major-cache-pager" class="pager"></div>
+        </div>
       </section>
 
       <section class="card module-panel" id="daily-module">

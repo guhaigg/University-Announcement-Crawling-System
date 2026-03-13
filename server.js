@@ -3386,6 +3386,56 @@ function getAdjustmentMajorCacheRecords(cacheLike, majorKeyword, targetYear = ''
     .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime());
 }
 
+function normalizeMajorCacheFilter(value) {
+  const majorKeyword = normalizeText(value || '');
+  return {
+    majorKeyword,
+    majorKey: normalizeMajorForCompare(majorKeyword)
+  };
+}
+
+function buildAdjustmentMajorCacheStats(recordsLike = []) {
+  const records = Array.isArray(recordsLike) ? recordsLike : [];
+  const majorMap = new Map();
+  records.forEach((record) => {
+    const key = String(record.majorKey || '').trim();
+    if (!key) return;
+    const current = majorMap.get(key) || {
+      majorKey: key,
+      majorKeyword: record.majorKeyword || '',
+      recordCount: 0,
+      totalItems: 0,
+      latestCheckedAt: ''
+    };
+    current.recordCount += 1;
+    current.totalItems += Array.isArray(record.items) ? record.items.length : 0;
+    if (!current.latestCheckedAt || new Date(record.checkedAt).getTime() > new Date(current.latestCheckedAt).getTime()) {
+      current.latestCheckedAt = record.checkedAt;
+      current.majorKeyword = record.majorKeyword || current.majorKeyword;
+    }
+    majorMap.set(key, current);
+  });
+  return Array.from(majorMap.values()).sort((a, b) => {
+    if (a.recordCount !== b.recordCount) return b.recordCount - a.recordCount;
+    return new Date(b.latestCheckedAt).getTime() - new Date(a.latestCheckedAt).getTime();
+  });
+}
+
+function toAdjustmentMajorCacheRecordSummary(recordLike) {
+  const record = normalizeAdjustmentMajorCacheRecord(recordLike);
+  return {
+    id: record.id,
+    majorKey: record.majorKey,
+    majorKeyword: record.majorKeyword,
+    targetYear: record.targetYear,
+    checkedAt: record.checkedAt,
+    query: record.query,
+    summary: record.summary,
+    itemCount: Array.isArray(record.items) ? record.items.length : 0,
+    schoolCount: Array.isArray(record.schools) ? record.schools.length : 0
+  };
+}
+
 function collectAdjustmentMajorCachedSchools(records, limit = 24) {
   const output = new Map();
   (Array.isArray(records) ? records : []).forEach((record, recordIndex) => {
@@ -6436,6 +6486,109 @@ app.post('/api/adjustment-major-test/export', async (req, res) => {
     res.json({ ok: true, ...output });
   } catch (error) {
     res.status(400).json({ error: error.message || '导出专业调剂测试 Markdown 失败' });
+  }
+});
+
+app.get('/api/adjustment-major-test/cache', async (req, res) => {
+  try {
+    const majorKeyword = String(req.query.majorKeyword || '').trim();
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 120));
+    const cache = await readAdjustmentMajorTestCache();
+    const majorStats = buildAdjustmentMajorCacheStats(cache.records || []);
+    const { majorKey } = normalizeMajorCacheFilter(majorKeyword);
+    const records = (Array.isArray(cache.records) ? cache.records : [])
+      .filter((record) => (!majorKey ? true : record.majorKey === majorKey))
+      .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
+      .slice(0, limit)
+      .map((record) => toAdjustmentMajorCacheRecordSummary(record));
+    res.json({
+      ok: true,
+      summary: {
+        updatedAt: cache.updatedAt || '',
+        totalRecords: Array.isArray(cache.records) ? cache.records.length : 0,
+        totalMajors: majorStats.length,
+        filteredRecords: records.length
+      },
+      majorStats,
+      records
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || '读取专业测试缓存失败' });
+  }
+});
+
+app.post('/api/adjustment-major-test/cache/prune', async (req, res) => {
+  const body = req.body || {};
+  const keepCount = Math.max(1, Math.min(50, Number(body.keepCount) || 5));
+  const majorKeyword = String(body.majorKeyword || '').trim();
+  const majorKeyText = String(body.majorKey || '').trim();
+  try {
+    const result = await mutateAdjustmentMajorTestCache(async (cache) => {
+      const source = (Array.isArray(cache.records) ? cache.records : [])
+        .map((record) => normalizeAdjustmentMajorCacheRecord(record))
+        .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime());
+      const before = source.length;
+      const targetKey = majorKeyText || normalizeMajorForCompare(majorKeyword);
+      const majorCountMap = new Map();
+      const kept = [];
+      let affectedMajors = new Set();
+      for (const record of source) {
+        const key = record.majorKey;
+        if (!key) continue;
+        if (targetKey && key !== targetKey) {
+          kept.push(record);
+          continue;
+        }
+        affectedMajors.add(key);
+        const used = majorCountMap.get(key) || 0;
+        if (used < keepCount) {
+          majorCountMap.set(key, used + 1);
+          kept.push(record);
+        }
+      }
+      cache.records = kept
+        .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
+        .slice(0, ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT);
+      const after = cache.records.length;
+      return {
+        deleted: Math.max(0, before - after),
+        remaining: after,
+        affectedMajors: affectedMajors.size
+      };
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '缓存裁剪失败' });
+  }
+});
+
+app.post('/api/adjustment-major-test/cache/clear', async (req, res) => {
+  const body = req.body || {};
+  const majorKeyword = String(body.majorKeyword || '').trim();
+  const majorKeyText = String(body.majorKey || '').trim();
+  try {
+    const result = await mutateAdjustmentMajorTestCache(async (cache) => {
+      const source = (Array.isArray(cache.records) ? cache.records : []).map((record) => normalizeAdjustmentMajorCacheRecord(record));
+      const before = source.length;
+      const targetKey = majorKeyText || normalizeMajorForCompare(majorKeyword);
+      if (!targetKey) {
+        cache.records = [];
+        return {
+          deleted: before,
+          remaining: 0,
+          mode: 'all'
+        };
+      }
+      cache.records = source.filter((record) => record.majorKey !== targetKey);
+      return {
+        deleted: Math.max(0, before - cache.records.length),
+        remaining: cache.records.length,
+        mode: 'major'
+      };
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '清空缓存失败' });
   }
 });
 

@@ -142,6 +142,15 @@ const adjustmentMajorTestSelectAll = document.getElementById('adjustment-major-t
 const adjustmentMajorTestInvert = document.getElementById('adjustment-major-test-invert');
 const adjustmentMajorTestList = document.getElementById('adjustment-major-test-list');
 const adjustmentMajorTestPager = document.getElementById('adjustment-major-test-pager');
+const adjustmentMajorCacheSummary = document.getElementById('adjustment-major-cache-summary');
+const adjustmentMajorCacheMajorFilter = document.getElementById('adjustment-major-cache-major-filter');
+const adjustmentMajorCacheKeepCount = document.getElementById('adjustment-major-cache-keep-count');
+const adjustmentMajorCacheRefreshBtn = document.getElementById('adjustment-major-cache-refresh-btn');
+const adjustmentMajorCachePruneBtn = document.getElementById('adjustment-major-cache-prune-btn');
+const adjustmentMajorCacheClearMajorBtn = document.getElementById('adjustment-major-cache-clear-major-btn');
+const adjustmentMajorCacheClearAllBtn = document.getElementById('adjustment-major-cache-clear-all-btn');
+const adjustmentMajorCacheList = document.getElementById('adjustment-major-cache-list');
+const adjustmentMajorCachePager = document.getElementById('adjustment-major-cache-pager');
 const adjustmentCleanQuickSchoolName = document.getElementById('adjustmentCleanQuickSchoolName');
 const adjustmentCleanQuickMajor = document.getElementById('adjustmentCleanQuickMajor');
 const adjustmentCleanQuickYear = document.getElementById('adjustmentCleanQuickYear');
@@ -176,6 +185,7 @@ let adjustmentMatch = null;
 let newsQueryState = null;
 let adjustmentCleanState = null;
 let adjustmentMajorTestState = null;
+let adjustmentMajorCacheState = null;
 let adjustmentCleanQuickSchools = [];
 let newsQuickSchools = [];
 let adjustmentQuickSchools = [];
@@ -194,7 +204,8 @@ const paginationState = {
   adjustmentCollege: { page: 1, pageSize: 10 },
   newsQuery: { page: 1, pageSize: 12 },
   adjustmentClean: { page: 1, pageSize: 12 },
-  adjustmentMajorTest: { page: 1, pageSize: 10 }
+  adjustmentMajorTest: { page: 1, pageSize: 10 },
+  adjustmentMajorCache: { page: 1, pageSize: 8 }
 };
 
 function escapeHtml(value) {
@@ -784,6 +795,105 @@ async function loadAdjustmentMajorTestCatalogStatus() {
   } catch (error) {
     adjustmentMajorTestStatus.textContent = `本地库状态读取失败：${error.message || '未知错误'}`;
   }
+}
+
+function getAdjustmentMajorCacheSelectedStat() {
+  if (!adjustmentMajorCacheState) return null;
+  const majorKey = String(adjustmentMajorCacheMajorFilter?.value || '').trim();
+  if (!majorKey) return null;
+  return (adjustmentMajorCacheState.majorStats || []).find((item) => String(item.majorKey || '').trim() === majorKey) || null;
+}
+
+function applyAdjustmentMajorCacheFilter() {
+  if (!adjustmentMajorCacheState) return [];
+  const majorKey = String(adjustmentMajorCacheMajorFilter?.value || '').trim();
+  const records = Array.isArray(adjustmentMajorCacheState.records) ? adjustmentMajorCacheState.records : [];
+  const filtered = majorKey ? records.filter((record) => String(record.majorKey || '').trim() === majorKey) : records.slice();
+  adjustmentMajorCacheState.filteredRecords = filtered;
+  return filtered;
+}
+
+function renderAdjustmentMajorCacheMajorOptions() {
+  if (!adjustmentMajorCacheMajorFilter || !adjustmentMajorCacheState) return;
+  const current = String(adjustmentMajorCacheMajorFilter.value || '').trim();
+  const stats = Array.isArray(adjustmentMajorCacheState.majorStats) ? adjustmentMajorCacheState.majorStats : [];
+  adjustmentMajorCacheMajorFilter.innerHTML = '<option value="">全部专业</option>';
+  stats.forEach((item) => {
+    const option = document.createElement('option');
+    option.value = String(item.majorKey || '');
+    option.textContent = `${item.majorKeyword || item.majorKey}（${item.recordCount || 0}次）`;
+    adjustmentMajorCacheMajorFilter.appendChild(option);
+  });
+  const available = stats.some((item) => String(item.majorKey || '') === current);
+  adjustmentMajorCacheMajorFilter.value = available ? current : '';
+}
+
+function refreshAdjustmentMajorCacheSummary() {
+  if (!adjustmentMajorCacheSummary || !adjustmentMajorCacheState) return;
+  const summary = adjustmentMajorCacheState.summary || {};
+  const filtered = Array.isArray(adjustmentMajorCacheState.filteredRecords) ? adjustmentMajorCacheState.filteredRecords : [];
+  const selected = getAdjustmentMajorCacheSelectedStat();
+  const selectedText = selected
+    ? `；当前专业：${selected.majorKeyword || '-'}（${selected.recordCount || 0} 次，公告 ${selected.totalItems || 0} 条）`
+    : '';
+  adjustmentMajorCacheSummary.textContent =
+    `缓存更新时间：${summary.updatedAt ? toLocalText(summary.updatedAt) : '-'}；共 ${summary.totalRecords || 0} 条记录，` +
+    `${summary.totalMajors || 0} 个专业，当前显示 ${filtered.length} 条${selectedText}`;
+}
+
+function renderAdjustmentMajorCacheList() {
+  if (!adjustmentMajorCacheList || !adjustmentMajorCacheState) return;
+  const records = Array.isArray(adjustmentMajorCacheState.filteredRecords) ? adjustmentMajorCacheState.filteredRecords : [];
+  const pageInfo = getPagedItems(records, 'adjustmentMajorCache');
+  renderPager(adjustmentMajorCachePager, 'adjustmentMajorCache', records.length);
+  if (!records.length) {
+    adjustmentMajorCacheList.innerHTML = '<li class="empty">当前没有可展示的缓存记录。</li>';
+    return;
+  }
+  adjustmentMajorCacheList.innerHTML = pageInfo.pageItems
+    .map((record) => {
+      const summary = record.summary || {};
+      return `<li class="scan-item news-item">
+        <div class="news-item-main">
+          <span class="scan-title">${escapeHtml(record.majorKeyword || '-')} ${record.targetYear ? ` / ${escapeHtml(record.targetYear)}` : ''}</span>
+          <span class="scan-date">时间：${escapeHtml(toLocalText(record.checkedAt || ''))}</span>
+          <span class="scan-date">记录ID：${escapeHtml(record.id || '-')}</span>
+          <span class="scan-date">公告：${record.itemCount || 0} 条；院校：${record.schoolCount || 0} 所</span>
+          <span class="scan-date">命中院校：${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0}；名额 ${summary.withQuota || 0}；附件 ${summary.withAttachment || 0}</span>
+        </div>
+        <div class="news-item-actions">
+          <button type="button" data-action="apply-major-cache" data-major="${encodeURIComponent(record.majorKeyword || '')}" data-year="${encodeURIComponent(
+            record.targetYear || ''
+          )}" class="muted">套用查询</button>
+        </div>
+      </li>`;
+    })
+    .join('');
+}
+
+function rerenderAdjustmentMajorCache(resetPage = false) {
+  if (!adjustmentMajorCacheState) return;
+  if (resetPage) ensurePagerState('adjustmentMajorCache').page = 1;
+  applyAdjustmentMajorCacheFilter();
+  renderAdjustmentMajorCacheList();
+  refreshAdjustmentMajorCacheSummary();
+}
+
+function renderAdjustmentMajorCache(dataLike) {
+  const data = dataLike || {};
+  adjustmentMajorCacheState = {
+    summary: data.summary || {},
+    majorStats: Array.isArray(data.majorStats) ? data.majorStats : [],
+    records: Array.isArray(data.records) ? data.records : [],
+    filteredRecords: []
+  };
+  renderAdjustmentMajorCacheMajorOptions();
+  rerenderAdjustmentMajorCache(true);
+}
+
+async function loadAdjustmentMajorTestCache() {
+  const data = await api('/api/adjustment-major-test/cache?limit=200');
+  renderAdjustmentMajorCache(data);
 }
 
 function getSelectedAdjustmentMajorTestItems() {
@@ -2758,7 +2868,7 @@ if (adjustmentMajorTestForm) {
         body: JSON.stringify(payload)
       });
       renderAdjustmentMajorTestResult(data.result);
-      await loadAdjustmentMajorTestCatalogStatus();
+      await Promise.all([loadAdjustmentMajorTestCatalogStatus(), loadAdjustmentMajorTestCache()]);
       switchModule('adjustment-major-test-module');
       showToast(`专业测试完成：命中 ${data.result?.summary?.totalNotices || 0} 条`);
     } catch (error) {
@@ -2832,6 +2942,107 @@ if (adjustmentMajorTestFilterReset) {
     if (adjustmentMajorTestHasQuotaFilter) adjustmentMajorTestHasQuotaFilter.checked = false;
     if (adjustmentMajorTestHasAttachmentFilter) adjustmentMajorTestHasAttachmentFilter.checked = false;
     rerenderAdjustmentMajorTest(true);
+  });
+}
+
+if (adjustmentMajorCacheRefreshBtn) {
+  adjustmentMajorCacheRefreshBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(adjustmentMajorCacheRefreshBtn, true, '刷新中...');
+      await loadAdjustmentMajorTestCache();
+      showToast('缓存列表已刷新');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentMajorCacheRefreshBtn, false);
+    }
+  });
+}
+
+if (adjustmentMajorCacheMajorFilter) {
+  adjustmentMajorCacheMajorFilter.addEventListener('change', () => {
+    rerenderAdjustmentMajorCache(true);
+  });
+}
+
+if (adjustmentMajorCachePruneBtn) {
+  adjustmentMajorCachePruneBtn.addEventListener('click', async () => {
+    const keepCount = Math.max(1, Math.min(50, Number(adjustmentMajorCacheKeepCount?.value || 5)));
+    const selected = getAdjustmentMajorCacheSelectedStat();
+    const payload = selected
+      ? { keepCount, majorKeyword: selected.majorKeyword || '', majorKey: selected.majorKey || '' }
+      : { keepCount };
+    try {
+      setButtonBusy(adjustmentMajorCachePruneBtn, true, '处理中...');
+      const data = await api('/api/adjustment-major-test/cache/prune', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      await loadAdjustmentMajorTestCache();
+      showToast(`保留完成：删除 ${data.deleted || 0} 条缓存记录`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentMajorCachePruneBtn, false);
+    }
+  });
+}
+
+if (adjustmentMajorCacheClearMajorBtn) {
+  adjustmentMajorCacheClearMajorBtn.addEventListener('click', async () => {
+    const selected = getAdjustmentMajorCacheSelectedStat();
+    if (!selected) {
+      showToast('请先选择一个专业后再清空', true);
+      return;
+    }
+    const confirmed = window.confirm(`确认清空“${selected.majorKeyword || selected.majorKey}”的全部缓存吗？`);
+    if (!confirmed) return;
+    try {
+      setButtonBusy(adjustmentMajorCacheClearMajorBtn, true, '清空中...');
+      const data = await api('/api/adjustment-major-test/cache/clear', {
+        method: 'POST',
+        body: JSON.stringify({ majorKeyword: selected.majorKeyword || '', majorKey: selected.majorKey || '' })
+      });
+      await loadAdjustmentMajorTestCache();
+      showToast(`已清空该专业缓存 ${data.deleted || 0} 条`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentMajorCacheClearMajorBtn, false);
+    }
+  });
+}
+
+if (adjustmentMajorCacheClearAllBtn) {
+  adjustmentMajorCacheClearAllBtn.addEventListener('click', async () => {
+    const confirmed = window.confirm('确认清空全部专业测试缓存吗？');
+    if (!confirmed) return;
+    try {
+      setButtonBusy(adjustmentMajorCacheClearAllBtn, true, '清空中...');
+      const data = await api('/api/adjustment-major-test/cache/clear', {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      await loadAdjustmentMajorTestCache();
+      showToast(`已清空全部缓存 ${data.deleted || 0} 条`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentMajorCacheClearAllBtn, false);
+    }
+  });
+}
+
+if (adjustmentMajorCacheList) {
+  adjustmentMajorCacheList.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action="apply-major-cache"]');
+    if (!btn) return;
+    const major = decodeURIComponent(btn.dataset.major || '');
+    const year = decodeURIComponent(btn.dataset.year || '');
+    if (adjustmentMajorTestMajor) adjustmentMajorTestMajor.value = major;
+    if (adjustmentMajorTestYear) adjustmentMajorTestYear.value = year;
+    switchModule('adjustment-major-test-module');
+    showToast('已套用到专业调剂测试表单');
   });
 }
 
@@ -3035,7 +3246,8 @@ if (loginForm) {
         loadNewsQuickSchools(),
         loadAdjustmentQuickSchools(),
         loadAdjustmentCleanQuickSchools(),
-        loadAdjustmentMajorTestCatalogStatus()
+        loadAdjustmentMajorTestCatalogStatus().catch(() => {}),
+        loadAdjustmentMajorTestCache().catch(() => {})
       ]);
       showToast(`欢迎回来，${(data.user && data.user.username) || username}`);
     } catch (error) {
@@ -3219,6 +3431,10 @@ function handlePagerAction(key, action) {
   }
   if (key === 'adjustmentMajorTest') {
     renderAdjustmentMajorTestList();
+    return;
+  }
+  if (key === 'adjustmentMajorCache') {
+    renderAdjustmentMajorCacheList();
   }
 }
 
@@ -3239,6 +3455,7 @@ bindPagerEvents(adjustmentCollegePager);
 bindPagerEvents(newsQueryPager);
 bindPagerEvents(adjustmentCleanPager);
 bindPagerEvents(adjustmentMajorTestPager);
+bindPagerEvents(adjustmentMajorCachePager);
 
 scanConfirmBtn.addEventListener('click', async () => {
   if (!pendingScan) {
@@ -3522,7 +3739,8 @@ async function init() {
     loadNewsQuickSchools(),
     loadAdjustmentQuickSchools(),
     loadAdjustmentCleanQuickSchools(),
-    loadAdjustmentMajorTestCatalogStatus()
+    loadAdjustmentMajorTestCatalogStatus().catch(() => {}),
+    loadAdjustmentMajorTestCache().catch(() => {})
   ]);
 }
 
