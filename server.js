@@ -891,6 +891,59 @@ function extractAdjustmentYearText(value) {
   return match ? match[1] : '';
 }
 
+function buildMajorKeywordVariants(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const compact = raw.replace(/\s+/g, '').replace(/[()（）\[\]【】\-_/]/g, '');
+  const variants = new Set([raw, compact]);
+
+  const cleaned = compact
+    .replace(/专业|方向|领域|类别|学位|全日制|非全日制/g, '')
+    .trim();
+  if (cleaned) {
+    variants.add(cleaned);
+  }
+
+  if (cleaned.startsWith('学科') && !cleaned.includes('教学')) {
+    const suffix = cleaned.slice(2).trim();
+    if (suffix) {
+      variants.add(suffix);
+      variants.add(`学科教学${suffix}`);
+      variants.add(`学科教学（${suffix}）`);
+    }
+  }
+  if (cleaned.includes('学科教学')) {
+    variants.add(cleaned.replace('学科教学', '学科'));
+  }
+  if (cleaned.includes('教学')) {
+    variants.add(cleaned.replace(/教学/g, ''));
+  }
+
+  return Array.from(variants).map((x) => x.trim()).filter(Boolean);
+}
+
+function normalizeMajorForCompare(value) {
+  return normalizeMatchText(String(value || ''))
+    .replace(/专业|方向|领域|类别|学位|全日制|非全日制/g, '')
+    .trim();
+}
+
+function isMajorKeywordMatch(text, majorKeyword) {
+  const source = normalizeMajorForCompare(text);
+  if (!source) return false;
+  const sourceLoose = source.replace(/教学/g, '');
+  const variants = buildMajorKeywordVariants(majorKeyword);
+  for (const variant of variants) {
+    const target = normalizeMajorForCompare(variant);
+    if (!target) continue;
+    const targetLoose = target.replace(/教学/g, '');
+    if (source.includes(target) || sourceLoose.includes(targetLoose)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function buildAdjustmentSearchQueries(options = {}, source = 'yanzhao') {
   const schoolName = String(options.schoolName || '').trim();
   const majorKeyword = String(options.majorKeyword || '').trim();
@@ -906,13 +959,18 @@ function buildAdjustmentSearchQueries(options = {}, source = 'yanzhao') {
   if (baseTokens.length) {
     querySeeds.push(`${baseTokens.join(' ')} site:${host}`);
   }
+  const majorVariants = buildMajorKeywordVariants(majorKeyword);
+  const majorSeed = majorVariants[0] || majorKeyword;
   if (majorOnly) {
-    querySeeds.push(`${majorKeyword} 研究生 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
-    querySeeds.push(`${majorKeyword} 调剂 名额 site:${host}`.replace(/\s+/g, ' ').trim());
-    querySeeds.push(`${majorKeyword} 复试 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
-    querySeeds.push(`${majorKeyword} ${sourceLabel} 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorSeed} 研究生 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorSeed} 调剂 名额 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorSeed} 复试 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorSeed} ${sourceLabel} 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    majorVariants.slice(1, 3).forEach((variant) => {
+      querySeeds.push(`${variant} 研究生 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    });
   } else {
-    querySeeds.push(`${schoolName} ${majorKeyword || ''} 调剂 公告 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${schoolName} ${majorSeed || ''} 调剂 公告 site:${host}`.replace(/\s+/g, ' ').trim());
     querySeeds.push(`${schoolName} 研究生 调剂 名额 site:${host}`);
     querySeeds.push(`${schoolName} 调剂 复试 site:${host}`);
     querySeeds.push(`${schoolName} ${sourceLabel} 调剂 site:${host}`);
@@ -943,7 +1001,7 @@ function scoreAdjustmentSearchItem(item, source, options = {}) {
   if (/经验|求助|请教|闲聊|八卦/.test(combined)) score -= 50;
   if (/login|passport|cas/.test(String(item.url || '').toLowerCase())) score -= 40;
   if (majorOnly && !majorKeyword) score -= 120;
-  if (majorOnly && majorKeyword && !combined.includes(majorKeyword)) score -= 26;
+  if (majorOnly && majorKeyword && !isMajorKeywordMatch(combined, majorKeyword)) score -= 26;
 
   try {
     const hostname = new URL(item.url).hostname.toLowerCase();
@@ -1008,9 +1066,10 @@ function buildAdjustmentQueryKeywords(options = {}) {
   const majorOnly = normalizeBooleanFlag(options.majorOnly, false);
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const userKeywords = parseKeywords(options.keywords || '');
+  const majorVariants = buildMajorKeywordVariants(majorKeyword);
   return Array.from(
     new Set(
-      [(majorOnly ? '' : schoolName), majorKeyword, targetYear, ...userKeywords, '调剂', '接收调剂', '缺额', '名额', '复试', '研究生招生'].filter((x) =>
+      [(majorOnly ? '' : schoolName), ...majorVariants, targetYear, ...userKeywords, '调剂', '接收调剂', '缺额', '名额', '复试', '研究生招生'].filter((x) =>
         String(x || '').trim()
       )
     )
@@ -1019,6 +1078,7 @@ function buildAdjustmentQueryKeywords(options = {}) {
 
 async function searchAdjustmentCandidatesBySource(source, options = {}) {
   const queries = buildAdjustmentSearchQueries(options, source);
+  const sourceHost = ADJUSTMENT_SOURCE_HOSTS[normalizeAdjustmentSource(source)] || '';
   const seen = new Set();
   const allItems = [];
   const limitPerQuery = Math.max(6, Math.min(12, Number(options.limitPerQuery) || 10));
@@ -1029,14 +1089,29 @@ async function searchAdjustmentCandidatesBySource(source, options = {}) {
     ]);
     for (const item of [...bingItems, ...sogouItems]) {
       if (!isValidHttpUrl(item.url)) continue;
-      const key = normalizeUrlForKey(item.url);
+      let resolvedUrl = item.url;
+      try {
+        const hostname = new URL(resolvedUrl).hostname.toLowerCase();
+        if (sourceHost && hostname !== sourceHost && !hostname.endsWith(`.${sourceHost}`)) {
+          resolvedUrl = await resolveSearchResultFinalUrl(resolvedUrl);
+        }
+      } catch (error) {
+        continue;
+      }
+      try {
+        const hostname = new URL(resolvedUrl).hostname.toLowerCase();
+        if (sourceHost && hostname !== sourceHost && !hostname.endsWith(`.${sourceHost}`)) continue;
+      } catch (error) {
+        continue;
+      }
+      const key = normalizeUrlForKey(resolvedUrl);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       allItems.push({
         source: normalizeAdjustmentSource(source),
         sourceLabel: getAdjustmentSourceLabel(source),
         title: normalizeText(item.title || ''),
-        url: item.url,
+        url: resolvedUrl,
         snippet: normalizeText(item.snippet || '')
       });
     }
@@ -1046,10 +1121,14 @@ async function searchAdjustmentCandidatesBySource(source, options = {}) {
       ...item,
       score: scoreAdjustmentSearchItem(item, source, options) + Math.max(0, 20 - idx)
     }))
-    .filter((item) => item.score > -10)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.max(12, Math.min(40, Number(options.maxCandidatesPerSource) || 24)));
-  return scored;
+    .sort((a, b) => b.score - a.score);
+
+  const preferred = scored.filter((item) => item.score > -40);
+  const cap = Math.max(12, Math.min(40, Number(options.maxCandidatesPerSource) || 24));
+  if (preferred.length) {
+    return preferred.slice(0, cap);
+  }
+  return scored.slice(0, cap);
 }
 
 async function enrichAdjustmentCandidate(candidate, options = {}, keywordMatchers = []) {
@@ -1119,7 +1198,7 @@ async function runAdjustmentDataCleaning(options = {}) {
   }
 
   const keywordMatchers = buildKeywordMatchers(buildAdjustmentQueryKeywords({ schoolName, majorKeyword, majorOnly, targetYear, keywords }));
-  const sourceCandidates = await Promise.all(
+  let sourceCandidates = await Promise.all(
     sources.map(async (source) => {
       const candidates = await searchAdjustmentCandidatesBySource(source, {
         schoolName,
@@ -1133,6 +1212,29 @@ async function runAdjustmentDataCleaning(options = {}) {
       return { source, candidates };
     })
   );
+  const allPrimaryCandidatesEmpty = sourceCandidates.every((entry) => !Array.isArray(entry.candidates) || entry.candidates.length === 0);
+  let usedBroadFallbackSearch = false;
+  if (majorOnly && allPrimaryCandidatesEmpty) {
+    usedBroadFallbackSearch = true;
+    sourceCandidates = await Promise.all(
+      sources.map(async (source) => {
+        const candidates = await searchAdjustmentCandidatesBySource(source, {
+          schoolName: '',
+          majorKeyword: '',
+          majorOnly: true,
+          targetYear,
+          keywords: ['调剂', ...keywords],
+          limitPerQuery: 12,
+          maxCandidatesPerSource: Math.max(24, limit * 2)
+        });
+        return { source, candidates };
+      })
+    );
+  }
+  const sourceCandidateStats = sourceCandidates.reduce((acc, entry) => {
+    acc[entry.source] = Array.isArray(entry.candidates) ? entry.candidates.length : 0;
+    return acc;
+  }, {});
 
   const mergedCandidates = [];
   const seen = new Set();
@@ -1151,19 +1253,23 @@ async function runAdjustmentDataCleaning(options = {}) {
 
   const items = [];
   const itemMap = new Map();
+  let deepCrawlCount = 0;
   for (const candidate of rankedCandidates) {
     try {
       const item = await enrichAdjustmentCandidate(candidate, { cleaningLevel }, keywordMatchers);
       if (!item.title || !item.url) continue;
       const textForMajor = normalizeMatchText(`${item.title} ${item.cleanedContent}`);
       const normalizedMajor = normalizeMatchText(majorKeyword);
-      const hasMajorHit = normalizedMajor ? textForMajor.includes(normalizedMajor) : false;
+      const hasMajorHit = normalizedMajor ? isMajorKeywordMatch(textForMajor, majorKeyword) : false;
+      if (majorOnly && normalizedMajor) {
+        const strongMajorEvidence = hasMajorHit || (item.keywordScore >= 12 && item.quotaNumbers.length > 0);
+        if (!strongMajorEvidence) continue;
+      }
       const keep =
         item.adjustmentHits > 0 ||
         item.keywordScore > 0 ||
         item.quotaNumbers.length > 0 ||
         hasMajorHit;
-      if (majorOnly && normalizedMajor && !hasMajorHit && item.keywordScore <= 0 && item.quotaNumbers.length <= 0) continue;
       if (!keep) continue;
       const key = buildAdjustmentItemKey(item);
       const old = itemMap.get(key);
@@ -1174,9 +1280,78 @@ async function runAdjustmentDataCleaning(options = {}) {
       continue;
     }
   }
+
+  if (!itemMap.size && majorOnly && majorKeyword && rankedCandidates.length) {
+    const majorVariants = buildMajorKeywordVariants(majorKeyword);
+    const detailKeywords = mergeKeywords(majorVariants, ['调剂', '复试', '名额', '缺额']);
+    const deepCandidates = rankedCandidates.slice(0, Math.min(8, rankedCandidates.length));
+    for (const pageCandidate of deepCandidates) {
+      if (!isValidHttpUrl(pageCandidate.url) || isNoticeDocumentUrl(pageCandidate.url)) continue;
+      try {
+        const pageResult = await evaluateAnnouncementPage(pageCandidate.url, detailKeywords, 'graduate_adjustment');
+        const detailSeeds = (pageResult.matchedItems.length ? pageResult.matchedItems : pageResult.allItems).slice(0, 14);
+        for (const seed of detailSeeds) {
+          try {
+            const detail = await fetchNoticeDetail({
+              title: seed.title,
+              url: seed.url,
+              dateHint: seed.dateHint || ''
+            });
+            const cleanedContent = cleanExtractedContent(`${detail.title || seed.title}\n${detail.content || ''}`, {
+              level: cleaningLevel,
+              paragraphDedup: cleaningLevel === 'strict'
+            });
+            const majorHit = isMajorKeywordMatch(`${detail.title || ''}\n${cleanedContent}`, majorKeyword);
+            if (!majorHit) continue;
+            const keywordMatch = scoreKeywordMatches(`${detail.title || ''}\n${cleanedContent}`, keywordMatchers);
+            const quota = extractAdjustmentQuota(`${detail.title || ''}\n${cleanedContent}`);
+            const contacts = extractAdjustmentContacts(cleanedContent);
+            const publishedDateObj = extractPublishedDate({
+              title: detail.title || seed.title || '',
+              url: detail.url || seed.url,
+              dateHint: detail.dateHint || seed.dateHint || ''
+            });
+            const item = {
+              id: buildAdjustmentItemKey(detail),
+              source: pageCandidate.source || 'yanzhao',
+              sourceLabel: pageCandidate.sourceLabel || getAdjustmentSourceLabel(pageCandidate.source || 'yanzhao'),
+              title: detail.title || seed.title || seed.url,
+              url: detail.url || seed.url,
+              publishedDate: publishedDateObj ? formatLocalDateKey(publishedDateObj) : '',
+              dateHint: detail.dateHint || seed.dateHint || '',
+              matchedKeywords: keywordMatch.matchedKeywords || [],
+              keywordScore: keywordMatch.keywordMatchScore || 0,
+              adjustmentHits: countHintHits(`${detail.title || ''} ${cleanedContent}`, ADJUSTMENT_HINTS),
+              quotaNumbers: quota.numbers,
+              quotaSnippets: quota.snippets,
+              contacts,
+              attachments: Array.isArray(detail.attachments) ? detail.attachments : [],
+              excerpt: cleanedContent ? `${cleanedContent.slice(0, 360)}${cleanedContent.length > 360 ? '...' : ''}` : '',
+              cleanedContent,
+              relevanceScore:
+                (pageCandidate.score || 0) +
+                (keywordMatch.keywordMatchScore || 0) +
+                (quota.numbers.length ? 28 : 0) +
+                24
+            };
+            const key = buildAdjustmentItemKey(item);
+            const old = itemMap.get(key);
+            if (!old || (old.relevanceScore || 0) < item.relevanceScore) {
+              itemMap.set(key, item);
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    deepCrawlCount = itemMap.size;
+  }
   items.push(...Array.from(itemMap.values()));
 
-  const finalItems = items
+  let finalItems = items
     .sort((a, b) => {
       if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
         return b.publishedDate.localeCompare(a.publishedDate);
@@ -1184,6 +1359,58 @@ async function runAdjustmentDataCleaning(options = {}) {
       return (b.relevanceScore || 0) - (a.relevanceScore || 0);
     })
     .slice(0, limit);
+
+  let fallbackCount = 0;
+  if (!finalItems.length && rankedCandidates.length) {
+    const fallbackMap = new Map();
+    for (const candidate of rankedCandidates) {
+      const mergedText = `${candidate.title || ''}\n${candidate.snippet || ''}`;
+      const majorHit = majorKeyword ? isMajorKeywordMatch(mergedText, majorKeyword) : false;
+      const adjustmentHits = countHintHits(mergedText, ADJUSTMENT_HINTS);
+      const keywordMatch = scoreKeywordMatches(mergedText, keywordMatchers);
+      const quota = extractAdjustmentQuota(mergedText);
+      if (majorOnly && majorKeyword && !majorHit) {
+        continue;
+      }
+      if (!majorOnly && schoolName && !normalizeMatchText(mergedText).includes(normalizeMatchText(schoolName)) && adjustmentHits <= 0) {
+        continue;
+      }
+      if (adjustmentHits <= 0 && keywordMatch.keywordMatchScore <= 0 && quota.numbers.length <= 0) {
+        continue;
+      }
+      const fallbackItem = {
+        id: buildAdjustmentItemKey(candidate),
+        source: candidate.source,
+        sourceLabel: candidate.sourceLabel,
+        title: candidate.title || candidate.url,
+        url: candidate.url,
+        publishedDate: extractPublishedDate({ title: candidate.title || '', url: candidate.url, dateHint: '' })
+          ? formatLocalDateKey(extractPublishedDate({ title: candidate.title || '', url: candidate.url, dateHint: '' }))
+          : '',
+        dateHint: '',
+        matchedKeywords: keywordMatch.matchedKeywords || [],
+        keywordScore: keywordMatch.keywordMatchScore || 0,
+        adjustmentHits,
+        quotaNumbers: quota.numbers,
+        quotaSnippets: quota.snippets,
+        contacts: extractAdjustmentContacts(candidate.snippet || ''),
+        attachments: [],
+        excerpt: normalizeText(candidate.snippet || candidate.title || ''),
+        cleanedContent: normalizeText(candidate.snippet || ''),
+        relevanceScore: (candidate.score || 0) + (keywordMatch.keywordMatchScore || 0) + adjustmentHits * 16 + (majorHit ? 22 : 0)
+      };
+      const key = buildAdjustmentItemKey(fallbackItem);
+      const old = fallbackMap.get(key);
+      if (!old || (old.relevanceScore || 0) < fallbackItem.relevanceScore) {
+        fallbackMap.set(key, fallbackItem);
+      }
+    }
+    const fallbackItems = Array.from(fallbackMap.values())
+      .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0))
+      .slice(0, limit);
+    fallbackCount = fallbackItems.length;
+    finalItems = fallbackItems;
+  }
 
   const sourceSummary = {
     yanzhao: finalItems.filter((x) => x.source === 'yanzhao').length,
@@ -1193,7 +1420,16 @@ async function runAdjustmentDataCleaning(options = {}) {
     total: finalItems.length,
     withQuota: finalItems.filter((x) => Array.isArray(x.quotaNumbers) && x.quotaNumbers.length > 0).length,
     withAttachment: finalItems.filter((x) => Array.isArray(x.attachments) && x.attachments.length > 0).length,
-    sourceSummary
+    sourceSummary,
+    pipeline: {
+      usedBroadFallbackSearch,
+      sourceCandidates: sourceCandidateStats,
+      mergedCandidates: mergedCandidates.length,
+      rankedCandidates: rankedCandidates.length,
+      detailSuccess: items.length,
+      deepCrawlCount,
+      fallbackCount
+    }
   };
 
   return {
@@ -1595,6 +1831,30 @@ async function resolveSogouRedirectUrl(url) {
     // ignore
   }
   return url;
+}
+
+async function resolveSearchResultFinalUrl(url) {
+  if (!isValidHttpUrl(url)) return '';
+  try {
+    const parsed = new URL(url);
+    const host = String(parsed.hostname || '').toLowerCase();
+    const isBingRedirect = /(^|\.)bing\.com$/.test(host) && /^\/ck\/a/i.test(parsed.pathname || '');
+    if (!isBingRedirect) {
+      return url;
+    }
+    const { finalUrl } = await safeHttpGet(url, {
+      timeout: 12000,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Referer: 'https://cn.bing.com/'
+      },
+      responseType: 'text',
+      validateStatus: (status) => status >= 200 && status < 400
+    });
+    return finalUrl || url;
+  } catch (error) {
+    return url;
+  }
 }
 
 async function searchBingWeb(query, limit = 12) {
