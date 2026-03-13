@@ -1,7 +1,7 @@
 {
   "name": "university-announcement-crawler",
   "version": "1.0.0",
-  "description": "每天抓取大学官网公告并导出 Markdown 的网页程序",
+  "description": "高校研招公告工作台：支持智能导航、公告正文抓取、调剂清洗与 Markdown 归档",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
