@@ -224,10 +224,7 @@ h1 {
 }
 
 .home-shell {
-  display: grid;
-  grid-template-columns: clamp(220px, 18vw, 290px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+  display: block;
   margin-bottom: 18px;
 }
 
@@ -239,6 +236,7 @@ h1 {
   min-width: 0;
   display: grid;
   gap: 16px;
+  margin-left: 210px;
 }
 
 .home-center .card,
@@ -246,10 +244,16 @@ h1 {
   margin-bottom: 0;
 }
 
+.home-side-left {
+  position: fixed;
+  left: 12px;
+  top: 86px;
+  width: 184px;
+  z-index: 70;
+}
+
 .side-floating-card {
-  position: sticky;
-  top: 84px;
-  max-height: calc(100vh - 96px);
+  max-height: calc(100vh - 98px);
   overflow: auto;
 }
 
@@ -299,7 +303,7 @@ h1 {
 
 .feature-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -362,7 +366,7 @@ h1 {
 }
 
 .function-drawer-card {
-  padding: 14px 14px 16px;
+  padding: 12px 10px 12px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(246, 239, 230, 0.86)),
     var(--paper);
@@ -386,8 +390,9 @@ h1 {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
-  border-radius: 12px;
-  padding: 7px 11px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .quick-guide-inline {
@@ -1269,19 +1274,24 @@ button.danger {
 
 @media (max-width: 1120px) {
   .home-shell {
+    display: grid;
     grid-template-columns: 1fr;
   }
 
   .home-center {
     order: 1;
+    margin-left: 0;
   }
 
   .home-side-left {
+    position: static;
+    left: auto;
+    top: auto;
+    width: 100%;
     order: 2;
   }
 
   .side-floating-card {
-    position: static;
     max-height: none;
     overflow: visible;
   }
