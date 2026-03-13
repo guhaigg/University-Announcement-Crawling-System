@@ -853,7 +853,8 @@ function refreshAdjustmentMajorTestSummary() {
   const selectedCount = getSelectedAdjustmentMajorTestItems().length;
   adjustmentMajorTestSummary.textContent =
     `匹配院校 ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
-    `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。`;
+    `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。` +
+    `历史辅助：院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条。`;
   const majorText = majorCandidates.length
     ? majorCandidates
         .slice(0, 8)
@@ -861,8 +862,11 @@ function refreshAdjustmentMajorTestSummary() {
         .filter(Boolean)
         .join(' / ')
     : '无';
+  const cacheModeText = summary.usedCacheFallback
+    ? '本次未抓到新内容，已直接展示历史清洗缓存。'
+    : `本次新抓取 ${summary.freshNotices || 0} 条，并融合历史缓存辅助展示。`;
   adjustmentMajorTestMajorHits.textContent =
-    `专业关键词：${query.majorKeyword || '-'}；年份：${query.targetYear || '-'}；候选专业：${majorText}`;
+    `专业关键词：${query.majorKeyword || '-'}；年份：${query.targetYear || '-'}；候选专业：${majorText}；${cacheModeText}`;
 }
 
 function renderAdjustmentMajorTestList() {

@@ -21,6 +21,7 @@ const OUTPUT_DIR = path.join(ROOT, 'outputs');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const YANZHAO_CATALOG_FILE = path.join(DATA_DIR, 'yanzhao_catalog.json');
+const ADJUSTMENT_MAJOR_TEST_CACHE_FILE = path.join(DATA_DIR, 'adjustment_major_test_cache.json');
 const SESSION_COOKIE_NAME = 'crawler_sid';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ADMIN_USER = String(process.env.DEFAULT_ADMIN_USER || 'admin').trim() || 'admin';
@@ -74,6 +75,8 @@ const ADJUSTMENT_SOURCE_LABELS = {
 };
 const YANZHAO_BASE_URL = 'https://yz.chsi.com.cn';
 const YANZHAO_CATALOG_MAX_AGE_MS = 72 * 60 * 60 * 1000;
+const ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT = 40;
+const ADJUSTMENT_MAJOR_TEST_CACHE_ITEM_LIMIT = 260;
 const YANZHAO_PROVINCE_LIST = [
   { code: '11', name: '北京', zone: '一区' },
   { code: '12', name: '天津', zone: '一区' },
@@ -113,6 +116,7 @@ const runningTasks = new Set();
 const sessions = new Map();
 const loginAttemptStore = new Map();
 let configMutationQueue = Promise.resolve();
+let majorTestCacheMutationQueue = Promise.resolve();
 const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '1mb' }));
@@ -447,6 +451,23 @@ async function ensureStorage() {
   }
   if (!fs.existsSync(USERS_FILE)) {
     await writeUsers({ users: [] });
+  }
+  if (!fs.existsSync(YANZHAO_CATALOG_FILE)) {
+    await writeYanzhaoCatalog({
+      version: 1,
+      source: YANZHAO_BASE_URL,
+      refreshedAt: '',
+      generatedAt: nowIsoSafe(),
+      schools: [],
+      majors: []
+    });
+  }
+  if (!fs.existsSync(ADJUSTMENT_MAJOR_TEST_CACHE_FILE)) {
+    await writeAdjustmentMajorTestCache({
+      version: 1,
+      updatedAt: nowIsoSafe(),
+      records: []
+    });
   }
   const userData = await readUsers();
   if (!Array.isArray(userData.users) || userData.users.length === 0) {
@@ -3180,6 +3201,397 @@ async function writeYanzhaoCatalog(catalog) {
   return normalized;
 }
 
+function mergeMajorMatchEntries(entries, limit = 6) {
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const zydm = String(entry?.zydm || '').trim();
+    const zymc = normalizeText(entry?.zymc || '');
+    const xwlx = String(entry?.xwlx || '').trim();
+    if (!zydm && !zymc) return;
+    const key = `${zydm}::${xwlx}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      zydm,
+      zymc,
+      xwlx,
+      xwlxmc: normalizeText(entry?.xwlxmc || (xwlx === 'zyxw' ? '专业学位' : xwlx === 'xs' ? '学术学位' : '')),
+      matchScore: Math.max(0, Number(entry?.matchScore) || 0)
+    });
+  });
+  return out.slice(0, limit);
+}
+
+function normalizeAdjustmentMajorCacheSchool(schoolLike) {
+  const school = schoolLike || {};
+  return {
+    schoolName: normalizeText(school.schoolName || ''),
+    dwdm: String(school.dwdm || '').trim(),
+    ssmc: normalizeText(school.ssmc || ''),
+    ssdm: String(school.ssdm || '').trim(),
+    majorMatches: mergeMajorMatchEntries(school.majorMatches, 6),
+    summary: {
+      scanned: Math.max(0, Number(school?.summary?.scanned) || 0),
+      matched: Math.max(0, Number(school?.summary?.matched) || 0),
+      withQuota: Math.max(0, Number(school?.summary?.withQuota) || 0),
+      withAttachment: Math.max(0, Number(school?.summary?.withAttachment) || 0)
+    },
+    error: normalizeText(school.error || '')
+  };
+}
+
+function normalizeAdjustmentMajorCacheItem(itemLike) {
+  const item = itemLike || {};
+  const attachments = (Array.isArray(item.attachments) ? item.attachments : [])
+    .map((attachment) => ({
+      name: normalizeText(attachment?.name || ''),
+      url: String(attachment?.url || '').trim()
+    }))
+    .filter((attachment) => attachment.url)
+    .slice(0, 20);
+  const quotaNumbers = (Array.isArray(item.quotaNumbers) ? item.quotaNumbers : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0 && value <= 500);
+  return {
+    id: String(item.id || '').trim(),
+    schoolName: normalizeText(item.schoolName || ''),
+    dwdm: String(item.dwdm || '').trim(),
+    ssmc: normalizeText(item.ssmc || ''),
+    title: normalizeText(item.title || ''),
+    url: String(item.url || '').trim(),
+    publishedDate: String(item.publishedDate || '').trim(),
+    dayBucket: String(item.dayBucket || 'other').trim(),
+    dayLabel: normalizeText(item.dayLabel || ''),
+    sourcePage: String(item.sourcePage || '').trim(),
+    matchedKeywords: parseKeywords(item.matchedKeywords || []),
+    keywordScore: Math.max(0, Number(item.keywordScore) || 0),
+    adjustmentHits: Math.max(0, Number(item.adjustmentHits) || 0),
+    quotaNumbers: Array.from(new Set(quotaNumbers)),
+    quotaSnippets: (Array.isArray(item.quotaSnippets) ? item.quotaSnippets : []).map((value) => normalizeText(value || '')).filter(Boolean).slice(0, 10),
+    attachments,
+    excerpt: normalizeText(item.excerpt || '').slice(0, 1200),
+    relevanceScore: Number(item.relevanceScore) || 0,
+    majorMatches: mergeMajorMatchEntries(item.majorMatches, 6),
+    fromCache: normalizeBooleanFlag(item.fromCache, false),
+    cacheCheckedAt: String(item.cacheCheckedAt || '').trim()
+  };
+}
+
+function normalizeAdjustmentMajorCacheRecord(recordLike) {
+  const record = recordLike || {};
+  const majorKeyword = normalizeText(record.majorKeyword || '');
+  const targetYear = extractAdjustmentYearText(record.targetYear || '');
+  const majorKey = normalizeMajorForCompare(majorKeyword);
+  return {
+    id: String(record.id || '').trim() || `major_cache_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    majorKey,
+    majorKeyword,
+    targetYear,
+    checkedAt: String(record.checkedAt || nowIsoSafe()),
+    query: {
+      keywords: parseKeywords(record?.query?.keywords || []),
+      maxSchools: Math.max(1, Math.min(20, Number(record?.query?.maxSchools) || 8)),
+      maxNoticesPerSchool: Math.max(4, Math.min(36, Number(record?.query?.maxNoticesPerSchool) || 14)),
+      forceRefresh: normalizeBooleanFlag(record?.query?.forceRefresh, false)
+    },
+    summary: {
+      schoolsFromCatalog: Math.max(0, Number(record?.summary?.schoolsFromCatalog) || 0),
+      schoolsScanned: Math.max(0, Number(record?.summary?.schoolsScanned) || 0),
+      schoolsWithResult: Math.max(0, Number(record?.summary?.schoolsWithResult) || 0),
+      failedSchools: Math.max(0, Number(record?.summary?.failedSchools) || 0),
+      totalNotices: Math.max(0, Number(record?.summary?.totalNotices) || 0),
+      withQuota: Math.max(0, Number(record?.summary?.withQuota) || 0),
+      withAttachment: Math.max(0, Number(record?.summary?.withAttachment) || 0)
+    },
+    majorCandidates: (Array.isArray(record.majorCandidates) ? record.majorCandidates : [])
+      .map((major) => ({
+        zydm: String(major?.zydm || '').trim(),
+        zymc: normalizeText(major?.zymc || ''),
+        xwlx: String(major?.xwlx || '').trim(),
+        xwlxmc: normalizeText(major?.xwlxmc || ''),
+        matchScore: Math.max(0, Number(major?.matchScore) || 0),
+        candidateSchoolCount: Math.max(0, Number(major?.candidateSchoolCount) || 0)
+      }))
+      .filter((major) => major.zydm && major.zymc)
+      .slice(0, 16),
+    schools: (Array.isArray(record.schools) ? record.schools : []).map((school) => normalizeAdjustmentMajorCacheSchool(school)).filter((school) => school.schoolName).slice(0, 30),
+    items: (Array.isArray(record.items) ? record.items : [])
+      .map((item) => normalizeAdjustmentMajorCacheItem(item))
+      .filter((item) => item.title && item.url)
+      .slice(0, ADJUSTMENT_MAJOR_TEST_CACHE_ITEM_LIMIT)
+  };
+}
+
+function normalizeAdjustmentMajorTestCache(cacheLike) {
+  const cache = cacheLike || {};
+  const records = (Array.isArray(cache.records) ? cache.records : [])
+    .map((record) => normalizeAdjustmentMajorCacheRecord(record))
+    .filter((record) => record.majorKey && record.majorKeyword)
+    .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
+    .slice(0, ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT);
+  return {
+    version: Number(cache.version || 1),
+    updatedAt: String(cache.updatedAt || nowIsoSafe()),
+    records
+  };
+}
+
+function runInMajorTestCacheQueue(job) {
+  const run = majorTestCacheMutationQueue.then(job, job);
+  majorTestCacheMutationQueue = run.catch(() => {});
+  return run;
+}
+
+async function readAdjustmentMajorTestCache() {
+  try {
+    const raw = await fsp.readFile(ADJUSTMENT_MAJOR_TEST_CACHE_FILE, 'utf8');
+    return normalizeAdjustmentMajorTestCache(JSON.parse(raw));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return normalizeAdjustmentMajorTestCache({ version: 1, updatedAt: nowIsoSafe(), records: [] });
+    }
+    throw error;
+  }
+}
+
+async function writeAdjustmentMajorTestCache(cacheLike) {
+  const cache = normalizeAdjustmentMajorTestCache(cacheLike);
+  const tmpFile = `${ADJUSTMENT_MAJOR_TEST_CACHE_FILE}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(tmpFile, JSON.stringify(cache, null, 2), 'utf8');
+  await fsp.rename(tmpFile, ADJUSTMENT_MAJOR_TEST_CACHE_FILE);
+  return cache;
+}
+
+async function mutateAdjustmentMajorTestCache(mutator) {
+  return runInMajorTestCacheQueue(async () => {
+    const cache = await readAdjustmentMajorTestCache();
+    const result = await mutator(cache);
+    cache.updatedAt = nowIsoSafe();
+    await writeAdjustmentMajorTestCache(cache);
+    return result;
+  });
+}
+
+function getAdjustmentMajorCacheRecords(cacheLike, majorKeyword, targetYear = '') {
+  const cache = normalizeAdjustmentMajorTestCache(cacheLike || {});
+  const majorKey = normalizeMajorForCompare(majorKeyword);
+  const year = extractAdjustmentYearText(targetYear || '');
+  return cache.records
+    .filter((record) => {
+      if (!majorKey || record.majorKey !== majorKey) return false;
+      if (!year) return true;
+      return !record.targetYear || record.targetYear === year;
+    })
+    .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime());
+}
+
+function collectAdjustmentMajorCachedSchools(records, limit = 24) {
+  const output = new Map();
+  (Array.isArray(records) ? records : []).forEach((record, recordIndex) => {
+    const recencyBonus = Math.max(0, 180 - recordIndex * 24);
+    (Array.isArray(record.schools) ? record.schools : []).forEach((school, schoolIndex) => {
+      const schoolName = normalizeText(school.schoolName || '');
+      if (!schoolName) return;
+      const key = String(school.dwdm || '').trim() || normalizeMatchText(schoolName);
+      if (!key) return;
+      const score = recencyBonus + Math.max(0, 80 - schoolIndex * 8) + (Number(school?.summary?.matched) || 0) * 12;
+      const old = output.get(key);
+      const mergedMatches = mergeMajorMatchEntries([...(old?.majorMatches || []), ...(school.majorMatches || [])], 6);
+      if (!old || old.score < score) {
+        output.set(key, {
+          schoolName,
+          dwdm: String(school.dwdm || '').trim(),
+          ssmc: normalizeText(school.ssmc || ''),
+          ssdm: String(school.ssdm || '').trim(),
+          majorMatches: mergedMatches,
+          score
+        });
+      } else {
+        old.majorMatches = mergedMatches;
+      }
+    });
+  });
+  return Array.from(output.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+function collectAdjustmentMajorCachedItems(records, limit = 180) {
+  const map = new Map();
+  (Array.isArray(records) ? records : []).forEach((record, recordIndex) => {
+    const recencyPenalty = recordIndex * 8;
+    (Array.isArray(record.items) ? record.items : []).forEach((item) => {
+      if (!item.title || !item.url) return;
+      const normalizedItem = normalizeAdjustmentMajorCacheItem(item);
+      const key = `${normalizeUrlForKey(normalizedItem.url)}::${normalizeMatchText(normalizedItem.title)}`;
+      if (!key) return;
+      const score = (Number(normalizedItem.relevanceScore) || 0) - recencyPenalty;
+      const old = map.get(key);
+      if (!old || (old.relevanceScore || 0) < score) {
+        map.set(key, {
+          ...normalizedItem,
+          relevanceScore: score,
+          fromCache: true,
+          cacheCheckedAt: record.checkedAt
+        });
+      }
+    });
+  });
+  return Array.from(map.values())
+    .sort((a, b) => {
+      if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+        return b.publishedDate.localeCompare(a.publishedDate);
+      }
+      return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+    })
+    .slice(0, limit);
+}
+
+function mergeAdjustmentMajorSchoolCandidates(primarySchools, cachedSchools, limit = 8) {
+  const map = new Map();
+  (Array.isArray(primarySchools) ? primarySchools : []).forEach((school, idx) => {
+    const key = String(school.dwdm || '').trim() || normalizeMatchText(school.schoolName || '');
+    if (!key) return;
+    map.set(key, {
+      ...school,
+      score: Number(school.score || 0) + Math.max(0, 40 - idx),
+      majorMatches: mergeMajorMatchEntries(school.majorMatches, 6)
+    });
+  });
+  (Array.isArray(cachedSchools) ? cachedSchools : []).forEach((school, idx) => {
+    const key = String(school.dwdm || '').trim() || normalizeMatchText(school.schoolName || '');
+    if (!key || !school.schoolName) return;
+    const old = map.get(key);
+    const cacheScore = Number(school.score || 0) + Math.max(0, 80 - idx * 6);
+    if (!old) {
+      map.set(key, {
+        schoolName: school.schoolName,
+        dwdm: String(school.dwdm || '').trim(),
+        ssmc: school.ssmc || '',
+        ssdm: school.ssdm || '',
+        majorMatches: mergeMajorMatchEntries(school.majorMatches, 6),
+        score: cacheScore
+      });
+      return;
+    }
+    old.score += Math.round(cacheScore * 0.45);
+    old.majorMatches = mergeMajorMatchEntries([...(old.majorMatches || []), ...(school.majorMatches || [])], 6);
+  });
+  return Array.from(map.values())
+    .sort((a, b) => (b.score || 0) - (a.score || 0) || String(a.schoolName || '').localeCompare(String(b.schoolName || '')))
+    .slice(0, limit);
+}
+
+function mergeAdjustmentMajorItemsWithCache(freshItems, cachedItems, limit = 220) {
+  const map = new Map();
+  (Array.isArray(freshItems) ? freshItems : []).forEach((item) => {
+    if (!item.title || !item.url) return;
+    const normalized = normalizeAdjustmentMajorCacheItem({ ...item, fromCache: false, cacheCheckedAt: '' });
+    const key = `${normalizeUrlForKey(normalized.url)}::${normalizeMatchText(normalized.title)}`;
+    if (!key) return;
+    map.set(key, normalized);
+  });
+  (Array.isArray(cachedItems) ? cachedItems : []).forEach((item) => {
+    if (!item.title || !item.url) return;
+    const normalized = normalizeAdjustmentMajorCacheItem({ ...item, fromCache: true, cacheCheckedAt: item.cacheCheckedAt || '' });
+    const key = `${normalizeUrlForKey(normalized.url)}::${normalizeMatchText(normalized.title)}`;
+    if (!key || map.has(key)) return;
+    normalized.relevanceScore = (Number(normalized.relevanceScore) || 0) - 12;
+    map.set(key, normalized);
+  });
+  return Array.from(map.values())
+    .sort((a, b) => {
+      if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+        return b.publishedDate.localeCompare(a.publishedDate);
+      }
+      return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+    })
+    .slice(0, limit);
+}
+
+function buildAdjustmentMajorCacheSnapshot(resultLike) {
+  const result = resultLike || {};
+  const query = result.query || {};
+  return normalizeAdjustmentMajorCacheRecord({
+    id: `major_cache_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    majorKeyword: query.majorKeyword || '',
+    targetYear: query.targetYear || '',
+    checkedAt: result.checkedAt || nowIsoSafe(),
+    query,
+    summary: result.summary || {},
+    majorCandidates: Array.isArray(result.majorCandidates) ? result.majorCandidates : [],
+    schools: Array.isArray(result.schools) ? result.schools : [],
+    items: Array.isArray(result.items) ? result.items : []
+  });
+}
+
+async function saveAdjustmentMajorTestCacheSnapshot(resultLike) {
+  const snapshot = buildAdjustmentMajorCacheSnapshot(resultLike);
+  if (!snapshot.majorKey || !snapshot.majorKeyword) {
+    return { saved: false, cachedRecordCount: 0 };
+  }
+  const data = await mutateAdjustmentMajorTestCache(async (cache) => {
+    const records = Array.isArray(cache.records) ? cache.records : [];
+    cache.records = [snapshot, ...records]
+      .map((record) => normalizeAdjustmentMajorCacheRecord(record))
+      .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
+      .slice(0, ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT);
+    return { saved: true, cachedRecordCount: cache.records.length };
+  });
+  return data;
+}
+
+function buildAdjustmentMajorResultFromCacheOnly(options = {}, catalogStatus = {}, cachedRecords = [], cachedSchools = [], cachedItems = []) {
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const keywords = parseKeywords(options.keywords || []);
+  const maxSchools = Math.max(1, Math.min(20, Number(options.maxSchools) || 8));
+  const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
+  const limit = Math.max(40, maxSchools * maxNoticesPerSchool);
+  const items = mergeAdjustmentMajorItemsWithCache([], cachedItems, limit);
+  const schools = collectAdjustmentMajorCachedSchools(cachedRecords, maxSchools).map((school) => ({
+    schoolName: school.schoolName,
+    dwdm: school.dwdm || '',
+    ssmc: school.ssmc || '',
+    majorMatches: mergeMajorMatchEntries(school.majorMatches, 6),
+    profile: {},
+    pages: [],
+    notices: [],
+    summary: { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0 },
+    error: ''
+  }));
+  const summary = {
+    schoolsFromCatalog: schools.length,
+    schoolsScanned: schools.length,
+    schoolsWithResult: new Set(items.map((item) => normalizeMatchText(item.schoolName || ''))).size,
+    failedSchools: 0,
+    totalNotices: items.length,
+    withQuota: items.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
+    withAttachment: items.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length,
+    cacheAssistSchools: cachedSchools.length,
+    cacheAssistItems: cachedItems.length,
+    usedCacheFallback: true,
+    freshNotices: 0
+  };
+  return {
+    checkedAt: nowIsoSafe(),
+    query: {
+      majorKeyword,
+      targetYear,
+      keywords,
+      maxSchools,
+      maxNoticesPerSchool,
+      forceRefresh: false
+    },
+    catalog: catalogStatus,
+    majorCandidates: (cachedRecords[0]?.majorCandidates || []).slice(0, 12),
+    schools,
+    summary,
+    items
+  };
+}
+
 function buildYanzhaoCatalogStatus(catalogLike) {
   const catalog = normalizeYanzhaoCatalog(catalogLike || {});
   const refreshedAt = String(catalog.refreshedAt || '');
@@ -3718,10 +4130,27 @@ async function runAdjustmentMajorTest(options = {}) {
   const maxSchools = Math.max(1, Math.min(20, Number(options.maxSchools) || 8));
   const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
   const maxMajorCandidates = Math.max(2, Math.min(14, Number(options.maxMajorCandidates) || 8));
-  const catalog = await getOrRefreshYanzhaoCatalog({ forceRefresh });
+  const cacheStore = await readAdjustmentMajorTestCache().catch(() => normalizeAdjustmentMajorTestCache({ records: [] }));
+  const cachedRecords = getAdjustmentMajorCacheRecords(cacheStore, majorKeyword, targetYear);
+  const cachedSchoolSeeds = collectAdjustmentMajorCachedSchools(cachedRecords, Math.max(maxSchools * 2, 16));
+  const cachedItemSeeds = collectAdjustmentMajorCachedItems(cachedRecords, 240);
+
+  let catalog;
+  try {
+    catalog = await getOrRefreshYanzhaoCatalog({ forceRefresh });
+  } catch (error) {
+    if (cachedItemSeeds.length) {
+      return buildAdjustmentMajorResultFromCacheOnly(options, { exists: false, refreshedAt: '', ageHours: null, schoolCount: 0, majorCount: 0 }, cachedRecords, cachedSchoolSeeds, cachedItemSeeds);
+    }
+    throw error;
+  }
+
   const autoMajorHints = await fetchYanzhaoAutoMajorHints(majorKeyword);
   const { picked, hintSet } = pickMatchedMajorCandidates(catalog, majorKeyword, Math.max(maxMajorCandidates * 2, 16));
   if (!picked.length) {
+    if (cachedItemSeeds.length) {
+      return buildAdjustmentMajorResultFromCacheOnly(options, buildYanzhaoCatalogStatus(catalog), cachedRecords, cachedSchoolSeeds, cachedItemSeeds);
+    }
     throw new Error('本地专业库未匹配到相关专业，请先刷新研招网本地库后重试');
   }
   autoMajorHints.forEach((item) => hintSet.add(item.zydm));
@@ -3768,7 +4197,7 @@ async function runAdjustmentMajorTest(options = {}) {
     }
   }
 
-  const schoolCandidates = Array.from(schoolMap.values())
+  const primarySchoolCandidates = Array.from(schoolMap.values())
     .map((item) => ({
       ...item,
       majorMatches: item.majorMatches
@@ -3776,10 +4205,13 @@ async function runAdjustmentMajorTest(options = {}) {
         .filter((value, index, arr) => arr.findIndex((x) => x.zydm === value.zydm) === index)
         .slice(0, 5)
     }))
-    .sort((a, b) => b.score - a.score || a.schoolName.localeCompare(b.schoolName))
-    .slice(0, Math.max(maxSchools, 1));
+    .sort((a, b) => b.score - a.score || a.schoolName.localeCompare(b.schoolName));
+  const schoolCandidates = mergeAdjustmentMajorSchoolCandidates(primarySchoolCandidates, cachedSchoolSeeds, Math.max(maxSchools, 1));
 
   if (!schoolCandidates.length) {
+    if (cachedItemSeeds.length) {
+      return buildAdjustmentMajorResultFromCacheOnly(options, buildYanzhaoCatalogStatus(catalog), cachedRecords, cachedSchoolSeeds, cachedItemSeeds);
+    }
     if (majorSchoolErrors.length) {
       throw new Error(`专业院校匹配失败：${majorSchoolErrors.slice(0, 2).join('；')}`);
     }
@@ -3811,17 +4243,36 @@ async function runAdjustmentMajorTest(options = {}) {
     }))
   );
 
+  const freshItems = items.sort((a, b) => {
+    if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+      return b.publishedDate.localeCompare(a.publishedDate);
+    }
+    return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+  });
+  const mergedLimit = Math.max(120, maxSchools * maxNoticesPerSchool * 3);
+  const finalItems =
+    freshItems.length > 0
+      ? mergeAdjustmentMajorItemsWithCache(freshItems, cachedItemSeeds, mergedLimit)
+      : mergeAdjustmentMajorItemsWithCache([], cachedItemSeeds, mergedLimit);
+  const usedCacheFallback = freshItems.length === 0 && finalItems.length > 0;
+  const schoolResultCount = schools.filter((school) => Array.isArray(school.notices) && school.notices.length > 0).length;
+  const fallbackSchoolCount = new Set(finalItems.map((item) => normalizeMatchText(item.schoolName || '')).filter(Boolean)).size;
+
   const summary = {
     schoolsFromCatalog: schoolCandidates.length,
     schoolsScanned: schools.length,
-    schoolsWithResult: schools.filter((school) => Array.isArray(school.notices) && school.notices.length > 0).length,
+    schoolsWithResult: usedCacheFallback && schoolResultCount === 0 ? fallbackSchoolCount : schoolResultCount,
     failedSchools: schools.filter((school) => school.error).length,
-    totalNotices: items.length,
-    withQuota: items.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
-    withAttachment: items.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length
+    totalNotices: finalItems.length,
+    withQuota: finalItems.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
+    withAttachment: finalItems.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length,
+    cacheAssistSchools: cachedSchoolSeeds.length,
+    cacheAssistItems: cachedItemSeeds.length,
+    usedCacheFallback,
+    freshNotices: freshItems.length
   };
 
-  return {
+  const result = {
     checkedAt: nowIsoSafe(),
     query: {
       majorKeyword,
@@ -3835,13 +4286,29 @@ async function runAdjustmentMajorTest(options = {}) {
     majorCandidates,
     schools,
     summary,
-    items: items.sort((a, b) => {
-      if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
-        return b.publishedDate.localeCompare(a.publishedDate);
-      }
-      return (b.relevanceScore || 0) - (a.relevanceScore || 0);
-    })
+    items: finalItems
   };
+
+  if (freshItems.length > 0) {
+    try {
+      const cacheSave = await saveAdjustmentMajorTestCacheSnapshot(result);
+      result.cache = {
+        saved: Boolean(cacheSave?.saved),
+        cachedRecordCount: Number(cacheSave?.cachedRecordCount || 0)
+      };
+    } catch (error) {
+      result.cache = {
+        saved: false,
+        error: error.message || '历史缓存写入失败'
+      };
+    }
+  } else {
+    result.cache = {
+      saved: false,
+      skipped: true
+    };
+  }
+  return result;
 }
 
 function buildAdjustmentMajorTestMarkdown(result, selectedItems = []) {
@@ -3861,6 +4328,8 @@ function buildAdjustmentMajorTestMarkdown(result, selectedItems = []) {
   lines.push(`- 本地库规模: 院校 ${catalog.schoolCount || 0} 所 / 专业 ${catalog.majorCount || 0} 条`);
   lines.push(`- 匹配院校: ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所`);
   lines.push(`- 公告命中: ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条）`);
+  lines.push(`- 历史缓存辅助: 院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条`);
+  lines.push(`- 是否使用历史回退: ${summary.usedCacheFallback ? '是（本次直接展示历史缓存）' : '否'}`);
   lines.push('');
   if (!allItems.length) {
     lines.push('未检索到符合条件的调剂公告。');

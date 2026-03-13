@@ -4,4 +4,5 @@ outputs/*.md
 data/config.json
 data/users.json
 data/yanzhao_catalog.json
+data/adjustment_major_test_cache.json
 data/*.tmp
