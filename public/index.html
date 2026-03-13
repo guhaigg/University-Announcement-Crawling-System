@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>大学官网公告爬取器</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>大学官网公告爬取器</h1>
+      <p class="subtitle">支持每日定时抓取、自助扫描候选链接、确认后抓取公告正文、关键词过滤和 Markdown 导出</p>
+      <section class="card auth-card" id="auth-info-card">
+        <div class="auth-info-row">
+          <span id="auth-welcome-text">未登录</span>
+          <button type="button" id="logout-btn" class="muted hidden">退出登录</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>功能导航</h2>
+        <div class="module-tabs" id="module-tabs">
+          <button type="button" data-module="adjustment-module">调剂智能导航</button>
+          <button type="button" data-module="news-query-module" data-focus="general">新公告查询</button>
+          <button type="button" data-module="news-query-module" data-focus="retest">复试内容检索</button>
+          <button type="button" data-module="daily-module">每日任务</button>
+          <button type="button" data-module="manual-module">自助爬取</button>
+          <button type="button" data-module="scan-panel">候选确认</button>
+          <button type="button" data-module="tasks-module">任务列表</button>
+          <button type="button" data-module="files-module">Markdown 输出</button>
+        </div>
+      </section>
+
+      <section class="card module-panel" id="adjustment-module">
+        <h2>研究生调剂智能导航</h2>
+        <div class="module-split">
+          <div class="module-main">
+            <form id="adjustment-form" class="form-grid">
+              <label>
+                院校名称
+                <input id="adjustmentSchoolName" required placeholder="例如：喀什大学" />
+              </label>
+
+              <label>
+                下属学院名称（可选）
+                <input id="adjustmentCollegeName" placeholder="例如：外语学院" />
+              </label>
+
+              <label>
+                关键词（逗号分隔，可选）
+                <input id="adjustmentKeywords" placeholder="调剂, 复试, 接受调剂" />
+              </label>
+
+              <label>
+                每日自动抓取时间
+                <input id="adjustmentScheduleTime" type="time" value="08:00" />
+              </label>
+
+              <label class="check-row">
+                <input id="adjustmentIncludeCollegePages" type="checkbox" checked />
+                包含学院层级页面
+              </label>
+
+              <div class="actions">
+                <button type="submit" id="adjustment-match-btn">智能匹配官网与研招页</button>
+                <button type="button" id="adjustment-apply-manual-btn" class="muted">回填到自助爬取</button>
+                <button type="button" id="adjustment-scan-btn">直接扫描候选公告</button>
+                <button type="button" id="adjustment-create-task-btn">一键生成每日任务</button>
+              </div>
+            </form>
+
+            <div id="adjustment-result" class="verify-panel hidden">
+              <h3>匹配结果</h3>
+              <p id="adjustment-summary" class="subtitle"></p>
+              <p id="adjustment-homepage"></p>
+              <p id="adjustment-college-homepage"></p>
+              <div class="verify-subpanel">
+                <h4>研究生招生页面候选（可多选）</h4>
+                <ul id="adjustment-announcement-list"></ul>
+                <div id="adjustment-announcement-pager" class="pager"></div>
+              </div>
+              <div class="verify-subpanel">
+                <h4>学院官网候选（单选）</h4>
+                <ul id="adjustment-college-homepage-list"></ul>
+                <div id="adjustment-college-homepage-pager" class="pager"></div>
+              </div>
+              <div class="verify-subpanel">
+                <h4>学院页面候选（多选，可回填）</h4>
+                <ul id="adjustment-college-list"></ul>
+                <div id="adjustment-college-pager" class="pager"></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="module-side">
+            <div class="side-panel" id="adjustment-quick-panel">
+              <h3>固定 10 所院校（一键查询）</h3>
+              <p class="subtitle">适用于调剂智能导航，支持保存院校+学院并批量智能匹配。</p>
+              <div class="form-grid">
+                <label>
+                  院校名称
+                  <input id="adjustmentQuickSchoolName" placeholder="例如：四川轻化工大学" />
+                </label>
+                <label>
+                  下属学院（可选）
+                  <input id="adjustmentQuickCollegeName" placeholder="例如：外语学院" />
+                </label>
+                <label class="check-row">
+                  <input id="adjustmentQuickIncludeCollegePages" type="checkbox" checked />
+                  包含学院层级页面
+                </label>
+                <div class="actions inline-actions">
+                  <button type="button" id="adjustment-quick-add-btn">加入固定院校</button>
+                  <button type="button" id="adjustment-quick-cancel-btn" class="muted">取消修改</button>
+                </div>
+              </div>
+              <p class="subtitle quick-editor-tip" id="adjustment-quick-editor-tip">当前为新增模式。</p>
+              <p class="subtitle">点击列表里的“查询”即可自动执行对应院校智能导航。</p>
+              <ul id="adjustment-quick-list"></ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="card module-panel hidden" id="news-query-module">
+        <h2>院校新公告查询</h2>
+        <div class="module-split">
+          <div class="module-main">
+            <form id="news-query-form" class="form-grid">
+              <label>
+                查询类型
+                <select id="newsQueryFocus">
+                  <option value="general">新公告查询</option>
+                  <option value="retest">复试内容检索</option>
+                </select>
+              </label>
+              <label>
+                院校名称
+                <input id="newsQuerySchoolName" required placeholder="例如：四川轻化工大学" />
+              </label>
+
+              <label>
+                下属学院名称（可选）
+                <input id="newsQueryCollegeName" placeholder="例如：外语学院" />
+              </label>
+
+              <label class="check-row">
+                <input id="newsQueryIncludeCollegePages" type="checkbox" checked />
+                包含学院层级页面
+              </label>
+
+              <div class="actions">
+                <button type="submit" id="news-query-run-btn">智能匹配并检查近三日研招公告</button>
+              </div>
+            </form>
+
+            <div id="news-query-result" class="verify-panel hidden">
+              <h3>查询结果</h3>
+              <p id="news-query-summary" class="subtitle"></p>
+              <p id="news-query-homepage"></p>
+              <p id="news-query-college-homepage"></p>
+              <div id="news-query-stats" class="news-summary-grid"></div>
+              <div class="scan-filters news-tools">
+                <label>
+                  日期筛选
+                  <select id="news-query-day-filter">
+                    <option value="">全部</option>
+                    <option value="today">今日</option>
+                    <option value="yesterday">昨日</option>
+                    <option value="day_before">前日</option>
+                    <option value="other">更早/未知</option>
+                  </select>
+                </label>
+                <label>
+                  关键词筛选
+                  <input id="news-query-keyword-filter" placeholder="输入关键词，例如：调剂 复试 拟录取" />
+                </label>
+                <button type="button" id="news-query-filter-reset" class="muted">清空筛选</button>
+              </div>
+              <ul id="news-query-list" class="scan-list"></ul>
+              <div id="news-query-pager" class="pager"></div>
+              <div id="news-viewer-panel" class="preview-panel hidden">
+                <h3 id="news-viewer-title">页内浏览</h3>
+                <p class="subtitle">若页面因站点安全策略无法嵌入，请使用“新窗口打开”。</p>
+                <iframe id="news-viewer-frame" title="公告页内浏览" class="news-viewer-frame"></iframe>
+              </div>
+            </div>
+          </div>
+
+          <aside class="module-side">
+            <div class="side-panel" id="news-quick-panel">
+              <h3>固定 10 所院校（一键查询）</h3>
+              <p class="subtitle">可用于新公告查询和复试检索。查询类型以左侧下拉框为准。</p>
+              <div class="form-grid">
+                <label>
+                  院校名称
+                  <input id="newsQuickSchoolName" placeholder="例如：四川轻化工大学" />
+                </label>
+                <label>
+                  下属学院（可选）
+                  <input id="newsQuickCollegeName" placeholder="例如：外语学院" />
+                </label>
+                <label class="check-row">
+                  <input id="newsQuickIncludeCollegePages" type="checkbox" checked />
+                  包含学院层级页面
+                </label>
+                <div class="actions inline-actions">
+                  <button type="button" id="news-quick-add-btn">加入固定院校</button>
+                  <button type="button" id="news-quick-cancel-btn" class="muted">取消修改</button>
+                </div>
+              </div>
+              <p class="subtitle quick-editor-tip" id="news-quick-editor-tip">当前为新增模式。</p>
+              <p class="subtitle">点击列表里的“查询”即可自动执行对应院校内容查询。</p>
+              <ul id="news-quick-list"></ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="card module-panel" id="daily-module">
+        <h2>每日爬取任务</h2>
+        <form id="task-form" class="form-grid">
+          <input type="hidden" id="task-id" />
+
+          <label>
+            院校名称
+            <input id="schoolName" required placeholder="例如：清华大学" />
+          </label>
+
+          <label>
+            院校官网链接
+            <input id="homepageUrl" required placeholder="https://www.xxx.edu.cn" />
+          </label>
+
+          <label>
+            公告页链接（可选）
+            <input id="announcementUrl" placeholder="不填则自动发现" />
+          </label>
+
+          <label>
+            抓取模式
+            <select id="crawlMode">
+              <option value="general">普通公告</option>
+              <option value="graduate_adjustment">研究生调剂公告</option>
+            </select>
+          </label>
+
+          <label class="check-row">
+            <input id="includeCollegePages" type="checkbox" />
+            调剂模式下包含学院层级页面
+          </label>
+
+          <label>
+            指定学院链接（可选，换行或逗号分隔）
+            <textarea id="collegeUrls" rows="3" placeholder="https://xxx.edu.cn/college-a&#10;https://xxx.edu.cn/college-b"></textarea>
+          </label>
+
+          <label>
+            关键词（逗号分隔）
+            <input id="keywords" placeholder="奖学金, 研究生, 招聘" />
+          </label>
+
+          <label>
+            每日抓取时间
+            <input id="scheduleTime" type="time" value="08:00" required />
+          </label>
+
+          <label class="check-row">
+            <input id="enabled" type="checkbox" checked />
+            创建后立即开启每日抓取
+          </label>
+
+          <div class="actions">
+            <button type="button" id="verify-btn">核对公告链接</button>
+            <button type="submit">保存每日任务</button>
+            <button type="button" id="reset-btn" class="muted">清空</button>
+          </div>
+        </form>
+
+        <div id="verify-panel" class="verify-panel hidden">
+          <h3>可选公告链接（点击可自动填充）</h3>
+          <ul id="verify-list"></ul>
+          <div id="verify-college-panel" class="verify-subpanel hidden">
+            <h4>可选学院链接（勾选后添加到上方“指定学院链接”）</h4>
+            <ul id="verify-college-list"></ul>
+            <button type="button" id="verify-college-add" class="muted">添加选中学院链接</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card module-panel" id="manual-module">
+        <h2>自助爬取（一次性）</h2>
+        <form id="manual-form" class="form-grid">
+          <label>
+            院校名称
+            <input id="manualSchoolName" placeholder="例如：北京大学" />
+          </label>
+
+          <label>
+            院校官网链接
+            <input id="manualHomepageUrl" required placeholder="https://www.xxx.edu.cn" />
+          </label>
+
+          <label>
+            公告页链接（可选）
+            <input id="manualAnnouncementUrl" placeholder="不填则自动发现" />
+          </label>
+
+          <label>
+            抓取模式
+            <select id="manualCrawlMode">
+              <option value="general">普通公告</option>
+              <option value="graduate_adjustment">研究生调剂公告</option>
+            </select>
+          </label>
+
+          <label class="check-row">
+            <input id="manualIncludeCollegePages" type="checkbox" />
+            调剂模式下包含学院层级页面
+          </label>
+
+          <label>
+            指定学院链接（可选，换行或逗号分隔）
+            <textarea id="manualCollegeUrls" rows="3" placeholder="https://xxx.edu.cn/college-a&#10;https://xxx.edu.cn/college-b"></textarea>
+          </label>
+
+          <label>
+            关键词（逗号分隔）
+            <input id="manualKeywords" placeholder="通知, 公告" />
+          </label>
+
+          <div class="actions">
+            <button type="button" id="manual-verify-btn">核对链接</button>
+            <button type="submit">扫描候选公告</button>
+          </div>
+        </form>
+
+        <div id="manual-verify-panel" class="verify-panel hidden">
+          <h3>可选公告链接（点击可自动填充）</h3>
+          <ul id="manual-verify-list"></ul>
+          <div id="manual-verify-college-panel" class="verify-subpanel hidden">
+            <h4>可选学院链接（勾选后添加到上方“指定学院链接”）</h4>
+            <ul id="manual-verify-college-list"></ul>
+            <button type="button" id="manual-verify-college-add" class="muted">添加选中学院链接</button>
+          </div>
+        </div>
+
+        <div class="verify-panel" id="manual-preset-panel">
+          <h3>最近十所院校</h3>
+          <div class="actions" id="preset-actions">
+            <button type="button" id="preset-select-all" class="muted">全选</button>
+            <button type="button" id="preset-invert">反选</button>
+            <button type="button" id="preset-delete-selected" class="danger">删除选中</button>
+          </div>
+          <ul id="manual-preset-list"></ul>
+        </div>
+      </section>
+
+      <section class="card hidden module-panel" id="scan-panel">
+        <h2>候选公告确认区</h2>
+        <p id="scan-info" class="subtitle"></p>
+        <div class="scan-filters">
+          <label>
+            关键词筛选
+            <input id="scan-filter-keyword" placeholder="输入关键词，例如：调剂 复试" />
+          </label>
+          <label>
+            年份筛选
+            <select id="scan-filter-year">
+              <option value="">全部年份</option>
+            </select>
+          </label>
+          <button type="button" id="scan-filter-reset" class="muted">清空筛选</button>
+        </div>
+        <div class="actions">
+          <button type="button" id="scan-select-all" class="muted">全选</button>
+          <button type="button" id="scan-invert">反选</button>
+          <button type="button" id="scan-confirm">确认爬取并生成文件</button>
+          <button type="button" id="scan-clear" class="muted">清空候选</button>
+        </div>
+        <ul id="scan-list" class="scan-list"></ul>
+        <div id="scan-pager" class="pager"></div>
+      </section>
+
+      <section class="card module-panel" id="tasks-module">
+        <h2>任务列表</h2>
+        <div id="task-list" class="task-list"></div>
+      </section>
+
+      <section class="card module-panel" id="files-module">
+        <h2>Markdown 输出</h2>
+        <div class="actions" id="file-actions">
+          <button type="button" id="file-select-all" class="muted">全选</button>
+          <button type="button" id="file-invert">反选</button>
+          <button type="button" id="file-delete-selected" class="danger">删除选中</button>
+          <button type="button" id="file-delete-all" class="danger">清空全部</button>
+        </div>
+        <ul id="file-list" class="file-list"></ul>
+        <div id="file-pager" class="pager"></div>
+        <div id="preview-panel" class="preview-panel hidden">
+          <h3 id="preview-title">文件预览</h3>
+          <pre id="preview-content"></pre>
+        </div>
+      </section>
+
+      <div id="toast" class="toast"></div>
+    </main>
+
+    <div id="auth-modal" class="auth-modal hidden">
+      <div class="auth-modal-content">
+        <h3>登录系统</h3>
+        <p class="subtitle">首次启动默认账号：admin，默认密码：admin123456。建议上线前使用环境变量修改。</p>
+        <form id="login-form" class="form-grid">
+          <label>
+            用户名
+            <input id="login-username" autocomplete="username" required placeholder="请输入用户名" />
+          </label>
+          <label>
+            密码
+            <input id="login-password" type="password" autocomplete="current-password" required placeholder="请输入密码" />
+          </label>
+          <p id="login-error" class="error-text"></p>
+          <div class="actions">
+            <button type="submit" id="login-submit-btn">登录</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
