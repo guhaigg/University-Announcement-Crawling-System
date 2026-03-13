@@ -513,12 +513,34 @@ button.danger {
   font-size: 13px;
 }
 
+.scan-filters .check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: auto;
+  min-height: 38px;
+  align-self: end;
+  color: var(--text);
+}
+
+.scan-filters .check-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
 .scan-filters input,
 .scan-filters select {
   height: 38px;
 }
 
 #scan-filter-reset {
+  width: auto;
+  min-width: 96px;
+  height: 38px;
+}
+
+#adjustment-major-test-filter-reset {
   width: auto;
   min-width: 96px;
   height: 38px;
@@ -903,6 +925,10 @@ button.danger {
   }
 
   .scan-filters label {
+    min-width: 100%;
+  }
+
+  .scan-filters .check-row {
     min-width: 100%;
   }
 

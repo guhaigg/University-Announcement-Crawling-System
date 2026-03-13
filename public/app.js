@@ -133,6 +133,11 @@ const adjustmentMajorTestExportBtn = document.getElementById('adjustment-major-t
 const adjustmentMajorTestResult = document.getElementById('adjustment-major-test-result');
 const adjustmentMajorTestSummary = document.getElementById('adjustment-major-test-summary');
 const adjustmentMajorTestMajorHits = document.getElementById('adjustment-major-test-major-hits');
+const adjustmentMajorTestRegionFilter = document.getElementById('adjustment-major-test-region-filter');
+const adjustmentMajorTestDegreeFilter = document.getElementById('adjustment-major-test-degree-filter');
+const adjustmentMajorTestHasQuotaFilter = document.getElementById('adjustment-major-test-has-quota-filter');
+const adjustmentMajorTestHasAttachmentFilter = document.getElementById('adjustment-major-test-has-attachment-filter');
+const adjustmentMajorTestFilterReset = document.getElementById('adjustment-major-test-filter-reset');
 const adjustmentMajorTestSelectAll = document.getElementById('adjustment-major-test-select-all');
 const adjustmentMajorTestInvert = document.getElementById('adjustment-major-test-invert');
 const adjustmentMajorTestList = document.getElementById('adjustment-major-test-list');
@@ -787,15 +792,68 @@ function getSelectedAdjustmentMajorTestItems() {
   return (adjustmentMajorTestState.items || []).filter((item) => selected.has(item.id));
 }
 
+function getAdjustmentMajorTestItemDegrees(item) {
+  const matches = Array.isArray(item?.majorMatches) ? item.majorMatches : [];
+  const out = [];
+  matches.forEach((entry) => {
+    const xwlxmc = String(entry?.xwlxmc || '').trim();
+    const xwlx = String(entry?.xwlx || '').trim();
+    const label = xwlxmc || (xwlx === 'zyxw' ? '专业学位' : xwlx === 'xs' ? '学术学位' : '');
+    if (label) out.push(label);
+  });
+  return Array.from(new Set(out));
+}
+
+function updateAdjustmentMajorTestRegionOptions() {
+  if (!adjustmentMajorTestRegionFilter || !adjustmentMajorTestState) return;
+  const current = String(adjustmentMajorTestRegionFilter.value || '').trim();
+  const regions = Array.from(
+    new Set(
+      (adjustmentMajorTestState.items || [])
+        .map((item) => String(item?.ssmc || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  adjustmentMajorTestRegionFilter.innerHTML = '<option value="">全部地区</option>';
+  regions.forEach((region) => {
+    const option = document.createElement('option');
+    option.value = region;
+    option.textContent = region;
+    adjustmentMajorTestRegionFilter.appendChild(option);
+  });
+  adjustmentMajorTestRegionFilter.value = regions.includes(current) ? current : '';
+}
+
+function applyAdjustmentMajorTestFilters() {
+  if (!adjustmentMajorTestState) return [];
+  const region = String(adjustmentMajorTestRegionFilter?.value || '').trim();
+  const degree = String(adjustmentMajorTestDegreeFilter?.value || '').trim();
+  const hasQuotaOnly = Boolean(adjustmentMajorTestHasQuotaFilter?.checked);
+  const hasAttachmentOnly = Boolean(adjustmentMajorTestHasAttachmentFilter?.checked);
+  const filtered = (adjustmentMajorTestState.items || []).filter((item) => {
+    if (region && String(item?.ssmc || '').trim() !== region) return false;
+    if (degree) {
+      const degreeTags = getAdjustmentMajorTestItemDegrees(item);
+      if (!degreeTags.includes(degree)) return false;
+    }
+    if (hasQuotaOnly && !(Array.isArray(item?.quotaNumbers) && item.quotaNumbers.length > 0)) return false;
+    if (hasAttachmentOnly && !(Array.isArray(item?.attachments) && item.attachments.length > 0)) return false;
+    return true;
+  });
+  adjustmentMajorTestState.filteredItems = filtered;
+  return filtered;
+}
+
 function refreshAdjustmentMajorTestSummary() {
   if (!adjustmentMajorTestState || !adjustmentMajorTestSummary || !adjustmentMajorTestMajorHits) return;
   const summary = adjustmentMajorTestState.summary || {};
   const query = adjustmentMajorTestState.query || {};
   const majorCandidates = Array.isArray(adjustmentMajorTestState.majorCandidates) ? adjustmentMajorTestState.majorCandidates : [];
+  const filteredCount = Array.isArray(adjustmentMajorTestState.filteredItems) ? adjustmentMajorTestState.filteredItems.length : 0;
   const selectedCount = getSelectedAdjustmentMajorTestItems().length;
   adjustmentMajorTestSummary.textContent =
     `匹配院校 ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
-    `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），已勾选 ${selectedCount} 条。`;
+    `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。`;
   const majorText = majorCandidates.length
     ? majorCandidates
         .slice(0, 8)
@@ -809,7 +867,7 @@ function refreshAdjustmentMajorTestSummary() {
 
 function renderAdjustmentMajorTestList() {
   if (!adjustmentMajorTestList || !adjustmentMajorTestState) return;
-  const items = Array.isArray(adjustmentMajorTestState.items) ? adjustmentMajorTestState.items : [];
+  const items = Array.isArray(adjustmentMajorTestState.filteredItems) ? adjustmentMajorTestState.filteredItems : [];
   const pageInfo = getPagedItems(items, 'adjustmentMajorTest');
   renderPager(adjustmentMajorTestPager, 'adjustmentMajorTest', items.length);
   if (!items.length) {
@@ -822,6 +880,7 @@ function renderAdjustmentMajorTestList() {
       const quotaText = Array.isArray(item.quotaNumbers) && item.quotaNumbers.length ? item.quotaNumbers.join(' / ') : '未识别';
       const keywordText = Array.isArray(item.matchedKeywords) && item.matchedKeywords.length ? item.matchedKeywords.join(' / ') : '无';
       const attachments = Array.isArray(item.attachments) ? item.attachments.length : 0;
+      const degrees = getAdjustmentMajorTestItemDegrees(item).join(' / ');
       const majorPath = Array.isArray(item.majorMatches)
         ? item.majorMatches
             .map((entry) => `${entry.zymc || ''}${entry.zydm ? `(${entry.zydm})` : ''}`)
@@ -836,6 +895,8 @@ function renderAdjustmentMajorTestList() {
             <span class="scan-title">${escapeHtml(item.title || '(无标题)')}</span>
             <span class="scan-badge news-badge-yesterday">${escapeHtml(item.schoolName || '未命名院校')}</span>
             ${item.publishedDate ? `<span class="scan-date">日期：${escapeHtml(item.publishedDate)}</span>` : ''}
+            ${item.ssmc ? `<span class="scan-date">地区：${escapeHtml(item.ssmc)}</span>` : ''}
+            ${degrees ? `<span class="scan-date">学位：${escapeHtml(degrees)}</span>` : ''}
             <span class="scan-date">名额提取：${escapeHtml(quotaText)}</span>
             <span class="scan-date">关键词命中：${escapeHtml(keywordText)}</span>
             <span class="scan-date">附件：${attachments}</span>
@@ -849,11 +910,20 @@ function renderAdjustmentMajorTestList() {
     .join('');
 }
 
+function rerenderAdjustmentMajorTest(resetPage = false) {
+  if (!adjustmentMajorTestState) return;
+  if (resetPage) ensurePagerState('adjustmentMajorTest').page = 1;
+  applyAdjustmentMajorTestFilters();
+  renderAdjustmentMajorTestList();
+  refreshAdjustmentMajorTestSummary();
+}
+
 function renderAdjustmentMajorTestResult(result) {
   adjustmentMajorTestState = result
     ? {
         ...result,
         items: Array.isArray(result.items) ? result.items : [],
+        filteredItems: [],
         selectedIds: new Set()
       }
     : null;
@@ -877,8 +947,12 @@ function renderAdjustmentMajorTestResult(result) {
     }
   });
   if (adjustmentMajorTestResult) adjustmentMajorTestResult.classList.remove('hidden');
-  renderAdjustmentMajorTestList();
-  refreshAdjustmentMajorTestSummary();
+  if (adjustmentMajorTestRegionFilter) adjustmentMajorTestRegionFilter.value = '';
+  if (adjustmentMajorTestDegreeFilter) adjustmentMajorTestDegreeFilter.value = '';
+  if (adjustmentMajorTestHasQuotaFilter) adjustmentMajorTestHasQuotaFilter.checked = false;
+  if (adjustmentMajorTestHasAttachmentFilter) adjustmentMajorTestHasAttachmentFilter.checked = false;
+  updateAdjustmentMajorTestRegionOptions();
+  rerenderAdjustmentMajorTest(true);
 }
 
 function renderAdjustmentCleanQuickSchools() {
@@ -2694,21 +2768,19 @@ if (adjustmentMajorTestForm) {
 if (adjustmentMajorTestSelectAll) {
   adjustmentMajorTestSelectAll.addEventListener('click', () => {
     if (!adjustmentMajorTestState) return;
-    (adjustmentMajorTestState.items || []).forEach((item) => adjustmentMajorTestState.selectedIds.add(item.id));
-    renderAdjustmentMajorTestList();
-    refreshAdjustmentMajorTestSummary();
+    (adjustmentMajorTestState.filteredItems || []).forEach((item) => adjustmentMajorTestState.selectedIds.add(item.id));
+    rerenderAdjustmentMajorTest(false);
   });
 }
 
 if (adjustmentMajorTestInvert) {
   adjustmentMajorTestInvert.addEventListener('click', () => {
     if (!adjustmentMajorTestState) return;
-    (adjustmentMajorTestState.items || []).forEach((item) => {
+    (adjustmentMajorTestState.filteredItems || []).forEach((item) => {
       if (adjustmentMajorTestState.selectedIds.has(item.id)) adjustmentMajorTestState.selectedIds.delete(item.id);
       else adjustmentMajorTestState.selectedIds.add(item.id);
     });
-    renderAdjustmentMajorTestList();
-    refreshAdjustmentMajorTestSummary();
+    rerenderAdjustmentMajorTest(false);
   });
 }
 
@@ -2722,6 +2794,40 @@ if (adjustmentMajorTestList) {
     if (input.checked) adjustmentMajorTestState.selectedIds.add(id);
     else adjustmentMajorTestState.selectedIds.delete(id);
     refreshAdjustmentMajorTestSummary();
+  });
+}
+
+if (adjustmentMajorTestRegionFilter) {
+  adjustmentMajorTestRegionFilter.addEventListener('change', () => {
+    rerenderAdjustmentMajorTest(true);
+  });
+}
+
+if (adjustmentMajorTestDegreeFilter) {
+  adjustmentMajorTestDegreeFilter.addEventListener('change', () => {
+    rerenderAdjustmentMajorTest(true);
+  });
+}
+
+if (adjustmentMajorTestHasQuotaFilter) {
+  adjustmentMajorTestHasQuotaFilter.addEventListener('change', () => {
+    rerenderAdjustmentMajorTest(true);
+  });
+}
+
+if (adjustmentMajorTestHasAttachmentFilter) {
+  adjustmentMajorTestHasAttachmentFilter.addEventListener('change', () => {
+    rerenderAdjustmentMajorTest(true);
+  });
+}
+
+if (adjustmentMajorTestFilterReset) {
+  adjustmentMajorTestFilterReset.addEventListener('click', () => {
+    if (adjustmentMajorTestRegionFilter) adjustmentMajorTestRegionFilter.value = '';
+    if (adjustmentMajorTestDegreeFilter) adjustmentMajorTestDegreeFilter.value = '';
+    if (adjustmentMajorTestHasQuotaFilter) adjustmentMajorTestHasQuotaFilter.checked = false;
+    if (adjustmentMajorTestHasAttachmentFilter) adjustmentMajorTestHasAttachmentFilter.checked = false;
+    rerenderAdjustmentMajorTest(true);
   });
 }
 

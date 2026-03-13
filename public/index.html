@@ -377,6 +377,31 @@
         <div id="adjustment-major-test-result" class="verify-panel hidden">
           <p id="adjustment-major-test-summary" class="subtitle"></p>
           <p id="adjustment-major-test-major-hits" class="subtitle"></p>
+          <div class="scan-filters">
+            <label>
+              地区筛选
+              <select id="adjustment-major-test-region-filter">
+                <option value="">全部地区</option>
+              </select>
+            </label>
+            <label>
+              学位类型
+              <select id="adjustment-major-test-degree-filter">
+                <option value="">全部学位</option>
+                <option value="专业学位">专业学位</option>
+                <option value="学术学位">学术学位</option>
+              </select>
+            </label>
+            <label class="check-row">
+              <input id="adjustment-major-test-has-quota-filter" type="checkbox" />
+              只看含名额
+            </label>
+            <label class="check-row">
+              <input id="adjustment-major-test-has-attachment-filter" type="checkbox" />
+              只看含附件
+            </label>
+            <button type="button" id="adjustment-major-test-filter-reset" class="muted">清空筛选</button>
+          </div>
           <div class="actions inline-actions">
             <button type="button" id="adjustment-major-test-select-all" class="muted">全选</button>
             <button type="button" id="adjustment-major-test-invert" class="muted">反选</button>
