@@ -3417,13 +3417,18 @@ function collectAdjustmentMajorCachedSchools(records, limit = 24) {
     .slice(0, limit);
 }
 
-function collectAdjustmentMajorCachedItems(records, limit = 180) {
+function collectAdjustmentMajorCachedItems(records, limit = 180, targetYear = '') {
   const map = new Map();
+  const year = extractAdjustmentYearText(targetYear || '');
   (Array.isArray(records) ? records : []).forEach((record, recordIndex) => {
     const recencyPenalty = recordIndex * 8;
     (Array.isArray(record.items) ? record.items : []).forEach((item) => {
       if (!item.title || !item.url) return;
       const normalizedItem = normalizeAdjustmentMajorCacheItem(item);
+      if (year) {
+        const yearSource = `${normalizedItem.publishedDate || ''} ${normalizedItem.title || ''} ${normalizedItem.url || ''} ${normalizedItem.excerpt || ''}`;
+        if (!yearSource.includes(year)) return;
+      }
       const key = `${normalizeUrlForKey(normalizedItem.url)}::${normalizeMatchText(normalizedItem.title)}`;
       if (!key) return;
       const score = (Number(normalizedItem.relevanceScore) || 0) - recencyPenalty;
@@ -4133,7 +4138,7 @@ async function runAdjustmentMajorTest(options = {}) {
   const cacheStore = await readAdjustmentMajorTestCache().catch(() => normalizeAdjustmentMajorTestCache({ records: [] }));
   const cachedRecords = getAdjustmentMajorCacheRecords(cacheStore, majorKeyword, targetYear);
   const cachedSchoolSeeds = collectAdjustmentMajorCachedSchools(cachedRecords, Math.max(maxSchools * 2, 16));
-  const cachedItemSeeds = collectAdjustmentMajorCachedItems(cachedRecords, 240);
+  const cachedItemSeeds = collectAdjustmentMajorCachedItems(cachedRecords, 240, targetYear);
 
   let catalog;
   try {
@@ -4291,7 +4296,11 @@ async function runAdjustmentMajorTest(options = {}) {
 
   if (freshItems.length > 0) {
     try {
-      const cacheSave = await saveAdjustmentMajorTestCacheSnapshot(result);
+      const snapshotResult = {
+        ...result,
+        items: freshItems
+      };
+      const cacheSave = await saveAdjustmentMajorTestCacheSnapshot(snapshotResult);
       result.cache = {
         saved: Boolean(cacheSave?.saved),
         cachedRecordCount: Number(cacheSave?.cachedRecordCount || 0)
