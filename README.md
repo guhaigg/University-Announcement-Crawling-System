@@ -273,9 +273,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-13 23:56:32（Asia/Shanghai）
+- 最近审核时间：2026-03-14 00:04:57（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：main
-- 最近提交：fe2ecfa refactor: dedupe homepage navigation and add scenario presets
+- 最近提交：9d23dac style: add floating side rails and scenario jump navigation
 - 当前工作区变更数：3
 <!-- AUTO_REVIEW_END -->

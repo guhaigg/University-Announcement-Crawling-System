@@ -41,8 +41,6 @@ const fileCleanSelectedBtn = document.getElementById('file-clean-selected');
 const fileDeleteSelectedBtn = document.getElementById('file-delete-selected');
 const fileDeleteAllBtn = document.getElementById('file-delete-all');
 const moduleTabs = document.getElementById('module-tabs');
-const functionDrawerToggle = document.getElementById('function-drawer-toggle');
-const functionDrawerBody = document.getElementById('function-drawer-body');
 const featureGrid = document.getElementById('feature-grid');
 const mastheadNav = document.getElementById('masthead-nav');
 const modulePanels = Array.from(document.querySelectorAll('.module-panel'));
@@ -3271,15 +3269,6 @@ document.getElementById('reset-btn').addEventListener('click', resetTaskForm);
 bindModuleNavigation(moduleTabs);
 bindModuleNavigation(featureGrid);
 bindModuleNavigation(mastheadNav);
-
-if (functionDrawerToggle && functionDrawerBody) {
-  functionDrawerToggle.addEventListener('click', () => {
-    const isHidden = functionDrawerBody.classList.contains('hidden');
-    functionDrawerBody.classList.toggle('hidden', !isHidden);
-    functionDrawerToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-    functionDrawerToggle.textContent = isHidden ? '收起' : '展开';
-  });
-}
 
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {

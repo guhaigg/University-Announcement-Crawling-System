@@ -223,7 +223,7 @@ h1 {
 
 .home-shell {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 260px;
+  grid-template-columns: 250px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
   margin-bottom: 18px;
@@ -360,27 +360,18 @@ h1 {
 }
 
 .function-drawer-card {
-  padding-bottom: 16px;
+  padding: 14px 14px 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(246, 239, 230, 0.86)),
+    var(--paper);
 }
 
 .drawer-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.drawer-head button {
-  width: auto;
-  font-size: 11px;
-  padding: 6px 11px;
-  box-shadow: none;
-}
-
-#function-drawer-body {
-  margin-top: 8px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--line);
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 2px;
 }
 
 .function-drawer-card .module-tabs {
@@ -397,22 +388,41 @@ h1 {
   padding: 7px 11px;
 }
 
-.quick-guide-card .guide-grid {
-  grid-template-columns: 1fr;
+.quick-guide-inline {
+  margin: 4px 2px 2px;
+  padding: 12px 14px 10px;
+  border-radius: 16px;
+  border: 1px dashed rgba(112, 86, 65, 0.2);
+  background: linear-gradient(180deg, rgba(250, 245, 237, 0.55), rgba(250, 245, 237, 0.18));
+}
+
+.quick-guide-inline h3 {
+  margin: 0 0 8px;
+  font-family: var(--heading-font);
+  font-size: 20px;
+  color: var(--accent-ink);
+}
+
+.quick-guide-inline .guide-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.quick-guide-card .guide-item {
-  padding: 12px;
-  border-radius: 14px;
+.quick-guide-inline .guide-item {
+  padding: 10px 11px;
+  border-radius: 12px;
+  border-color: rgba(31, 111, 120, 0.1);
+  background: rgba(255, 255, 255, 0.48);
+  box-shadow: none;
 }
 
-.quick-guide-card .guide-item strong {
-  font-size: 16px;
+.quick-guide-inline .guide-item strong {
+  font-size: 15px;
 }
 
-.quick-guide-card .guide-item p {
+.quick-guide-inline .guide-item p {
   font-size: 12px;
+  line-height: 1.55;
 }
 
 .guide-grid {
@@ -1268,10 +1278,6 @@ button.danger {
     order: 2;
   }
 
-  .home-side-right {
-    order: 3;
-  }
-
   .side-floating-card {
     position: static;
     max-height: none;
@@ -1321,6 +1327,10 @@ button.danger {
   }
 
   .guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-guide-inline .guide-grid {
     grid-template-columns: 1fr;
   }
 

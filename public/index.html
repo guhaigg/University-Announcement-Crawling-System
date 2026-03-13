@@ -33,23 +33,20 @@
         <aside class="home-side home-side-left">
           <section class="card function-drawer-card side-floating-card">
             <div class="drawer-head">
-              <h2>全部功能</h2>
-              <button type="button" id="function-drawer-toggle" class="muted" aria-expanded="false" aria-controls="function-drawer-body">展开</button>
+              <h2>功能导航</h2>
             </div>
-            <p class="subtitle">悬浮在左侧，随时展开完整功能入口。</p>
-            <div id="function-drawer-body" class="hidden">
-              <div class="module-tabs" id="module-tabs">
-                <button type="button" data-module="adjustment-module">调剂智能导航</button>
-                <button type="button" data-module="adjustment-clean-module">调剂数据清洗</button>
-                <button type="button" data-module="adjustment-major-test-module">专业调剂测试</button>
-                <button type="button" data-module="news-query-module" data-focus="general">新公告查询</button>
-                <button type="button" data-module="news-query-module" data-focus="retest">复试内容检索</button>
-                <button type="button" data-module="daily-module">每日任务</button>
-                <button type="button" data-module="manual-module">自助爬取</button>
-                <button type="button" data-module="scan-panel">候选确认</button>
-                <button type="button" data-module="tasks-module">任务列表</button>
-                <button type="button" data-module="files-module">Markdown 输出</button>
-              </div>
+            <p class="subtitle">左侧悬浮，默认展开。</p>
+            <div class="module-tabs" id="module-tabs">
+              <button type="button" data-module="adjustment-module">调剂智能导航</button>
+              <button type="button" data-module="adjustment-clean-module">调剂数据清洗</button>
+              <button type="button" data-module="adjustment-major-test-module">专业调剂测试</button>
+              <button type="button" data-module="news-query-module" data-focus="general">新公告查询</button>
+              <button type="button" data-module="news-query-module" data-focus="retest">复试内容检索</button>
+              <button type="button" data-module="daily-module">每日任务</button>
+              <button type="button" data-module="manual-module">自助爬取</button>
+              <button type="button" data-module="scan-panel">候选确认</button>
+              <button type="button" data-module="tasks-module">任务列表</button>
+              <button type="button" data-module="files-module">Markdown 输出</button>
             </div>
           </section>
         </aside>
@@ -105,11 +102,9 @@
               </button>
             </div>
           </section>
-        </div>
 
-        <aside class="home-side home-side-right">
-          <section class="card quick-guide-card side-floating-card">
-            <h2>快速上手</h2>
+          <section class="quick-guide-inline" aria-label="快速上手">
+            <h3>快速上手</h3>
             <div class="guide-grid">
               <div class="guide-item">
                 <strong>1. 找入口</strong>
@@ -125,7 +120,7 @@
               </div>
             </div>
           </section>
-        </aside>
+        </div>
       </section>
 
       <section class="card module-panel" id="adjustment-module">
