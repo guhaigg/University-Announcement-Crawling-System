@@ -1677,7 +1677,11 @@ function scrollToModulePanel(moduleId) {
 
 function handleModuleNavigation(btn) {
   if (!btn) return;
-  const shouldJump = btn.dataset.jump === 'true' || Boolean(btn.closest('#feature-grid'));
+  const shouldJump =
+    btn.dataset.jump === 'true' ||
+    Boolean(btn.closest('#feature-grid')) ||
+    Boolean(btn.closest('#module-tabs')) ||
+    Boolean(btn.closest('#masthead-nav'));
   applyScenarioPreset(btn);
   if (btn.dataset.module === 'news-query-module' && Object.prototype.hasOwnProperty.call(btn.dataset, 'focus')) {
     applyNewsQueryFocusUI(btn.dataset.focus);

@@ -273,9 +273,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-14 00:20:06（Asia/Shanghai）
+- 最近审核时间：2026-03-14 07:40:31（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：main
-- 最近提交：2cdf884 style: make scenario cards vertical and pin nav to left
-- 当前工作区变更数：2
+- 最近提交：4c5adf6 style: redesign homepage with blog-inspired visual language
+- 当前工作区变更数：1
 <!-- AUTO_REVIEW_END -->
