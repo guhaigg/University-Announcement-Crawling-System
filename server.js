@@ -7,6 +7,8 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns/promises');
+const net = require('net');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 
@@ -56,6 +58,8 @@ const scheduledJobs = new Map();
 const runningTasks = new Set();
 const sessions = new Map();
 let configMutationQueue = Promise.resolve();
+const remoteHostSafetyCache = new Map();
+const REMOTE_HOST_CACHE_TTL_MS = 5 * 60 * 1000;
 const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '1mb' }));
@@ -669,6 +673,124 @@ function isValidHttpUrl(value) {
   }
 }
 
+function ipv4ToInt(ip) {
+  const parts = String(ip || '')
+    .split('.')
+    .map((x) => Number(x));
+  if (parts.length !== 4 || parts.some((x) => !Number.isInteger(x) || x < 0 || x > 255)) {
+    return null;
+  }
+  return (((parts[0] << 24) >>> 0) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+function inIpv4Cidr(ip, base, prefix) {
+  const ipInt = ipv4ToInt(ip);
+  const baseInt = ipv4ToInt(base);
+  if (ipInt === null || baseInt === null) return false;
+  const mask = prefix === 0 ? 0 : ((0xffffffff << (32 - prefix)) >>> 0);
+  return (ipInt & mask) === (baseInt & mask);
+}
+
+function isBlockedIpv4(ip) {
+  const text = String(ip || '').trim();
+  if (!text) return true;
+  return (
+    inIpv4Cidr(text, '0.0.0.0', 8) ||
+    inIpv4Cidr(text, '10.0.0.0', 8) ||
+    inIpv4Cidr(text, '100.64.0.0', 10) ||
+    inIpv4Cidr(text, '127.0.0.0', 8) ||
+    inIpv4Cidr(text, '169.254.0.0', 16) ||
+    inIpv4Cidr(text, '172.16.0.0', 12) ||
+    inIpv4Cidr(text, '192.0.0.0', 24) ||
+    inIpv4Cidr(text, '192.0.2.0', 24) ||
+    inIpv4Cidr(text, '192.168.0.0', 16) ||
+    inIpv4Cidr(text, '198.18.0.0', 15) ||
+    inIpv4Cidr(text, '198.51.100.0', 24) ||
+    inIpv4Cidr(text, '203.0.113.0', 24) ||
+    inIpv4Cidr(text, '224.0.0.0', 4) ||
+    inIpv4Cidr(text, '240.0.0.0', 4)
+  );
+}
+
+function isBlockedIpv6(ip) {
+  const text = String(ip || '').trim().toLowerCase();
+  if (!text) return true;
+  if (text === '::' || text === '::1') return true;
+  if (text.startsWith('fe80:')) return true;
+  if (text.startsWith('ff')) return true;
+  if (text.startsWith('fc') || text.startsWith('fd')) return true;
+  if (text.startsWith('2001:db8:')) return true;
+  if (text.startsWith('::ffff:')) {
+    const mapped = text.slice('::ffff:'.length);
+    return isBlockedIpv4(mapped);
+  }
+  return false;
+}
+
+function isBlockedIpAddress(address) {
+  const ip = String(address || '').trim();
+  const version = net.isIP(ip);
+  if (version === 4) return isBlockedIpv4(ip);
+  if (version === 6) return isBlockedIpv6(ip);
+  return true;
+}
+
+function isBlockedHostName(hostname) {
+  const host = String(hostname || '').trim().toLowerCase();
+  if (!host) return { blocked: true, reason: '空主机名' };
+  if (host === 'localhost' || host.endsWith('.localhost')) {
+    return { blocked: true, reason: '禁止访问 localhost' };
+  }
+  if (host.endsWith('.local')) {
+    return { blocked: true, reason: '禁止访问局域网域名' };
+  }
+  const ipVersion = net.isIP(host);
+  if (ipVersion && isBlockedIpAddress(host)) {
+    return { blocked: true, reason: '禁止访问内网或保留地址' };
+  }
+  return { blocked: false, reason: '' };
+}
+
+async function assertSafeRemoteUrl(url, sourceLabel = '抓取任务') {
+  if (!isValidHttpUrl(url)) {
+    throw new Error(`${sourceLabel}链接非法`);
+  }
+  const parsed = new URL(url);
+  const host = String(parsed.hostname || '').trim().toLowerCase();
+  const hostCheck = isBlockedHostName(host);
+  if (hostCheck.blocked) {
+    throw new Error(`${sourceLabel}被安全策略拦截：${hostCheck.reason}`);
+  }
+
+  const now = nowTs();
+  const cache = remoteHostSafetyCache.get(host);
+  if (cache && now - cache.checkedAt <= REMOTE_HOST_CACHE_TTL_MS) {
+    if (!cache.allowed) {
+      throw new Error(`${sourceLabel}被安全策略拦截：${cache.reason}`);
+    }
+    return parsed.toString();
+  }
+
+  let addresses = [];
+  try {
+    addresses = await dns.lookup(host, { all: true, verbatim: true });
+  } catch (error) {
+    throw new Error(`${sourceLabel}域名解析失败`);
+  }
+  if (!Array.isArray(addresses) || !addresses.length) {
+    throw new Error(`${sourceLabel}域名解析失败`);
+  }
+
+  const blockedAddress = addresses.find((item) => isBlockedIpAddress(item?.address));
+  const blocked = Boolean(blockedAddress);
+  const reason = blocked ? '禁止访问内网或保留地址' : '';
+  remoteHostSafetyCache.set(host, { checkedAt: now, allowed: !blocked, reason });
+  if (blocked) {
+    throw new Error(`${sourceLabel}被安全策略拦截：${reason}`);
+  }
+  return parsed.toString();
+}
+
 function normalizeUrl(base, href) {
   try {
     return new URL(href, base).toString();
@@ -752,14 +874,14 @@ async function resolveSogouRedirectUrl(url) {
       return url;
     }
 
-    const response = await axios.get(url, {
+    const { response } = await safeHttpGet(url, {
       timeout: 12000,
-      maxRedirects: 3,
       headers: {
         'User-Agent': USER_AGENT,
         Referer: 'https://www.sogou.com/'
       },
-      responseType: 'text'
+      responseType: 'text',
+      validateStatus: (status) => status >= 200 && status < 400
     });
     const redirected = extractSogouRedirectHtmlUrl(response.data);
     if (redirected) return redirected;
@@ -1895,18 +2017,43 @@ function detectCharset(headers, rawBuffer) {
   return 'utf-8';
 }
 
+async function safeHttpGet(url, config = {}, maxRedirects = 5) {
+  let currentUrl = String(url || '').trim();
+  for (let step = 0; step <= maxRedirects; step += 1) {
+    const safeUrl = await assertSafeRemoteUrl(currentUrl, '抓取任务');
+    const response = await axios.get(safeUrl, {
+      ...config,
+      maxRedirects: 0
+    });
+    const status = Number(response.status || 0);
+    const location = String(response.headers?.location || '').trim();
+    if (status >= 300 && status < 400 && location) {
+      currentUrl = normalizeUrl(safeUrl, location);
+      if (!currentUrl) {
+        throw new Error('重定向链接非法');
+      }
+      continue;
+    }
+    return { response, finalUrl: safeUrl };
+  }
+  throw new Error('重定向次数超过限制');
+}
+
 async function fetchHtml(url) {
-  const response = await axios.get(url, {
-    responseType: 'arraybuffer',
-    timeout: 20000,
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+  const { response, finalUrl } = await safeHttpGet(
+    url,
+    {
+      responseType: 'arraybuffer',
+      timeout: 20000,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      },
+      validateStatus: (status) => status >= 200 && status < 400
     },
-    maxRedirects: 5,
-    validateStatus: (status) => status >= 200 && status < 400
-  });
+    5
+  );
 
   const raw = Buffer.from(response.data);
   let charset = detectCharset(response.headers, raw);
@@ -1923,7 +2070,7 @@ async function fetchHtml(url) {
 
   return {
     html,
-    finalUrl: response.request?.res?.responseUrl || url,
+    finalUrl,
     contentType: String(response.headers?.['content-type'] || '').toLowerCase()
   };
 }
