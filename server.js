@@ -4361,6 +4361,9 @@ app.post('/api/files/delete-many', async (req, res) => {
 
 app.get('/api/files/:name/content', async (req, res) => {
   const fileName = path.basename(req.params.name);
+  if (!fileName.endsWith('.md')) {
+    return res.status(400).json({ error: '仅支持预览 Markdown 文件' });
+  }
   const fullPath = path.join(OUTPUT_DIR, fileName);
 
   if (!fs.existsSync(fullPath)) {
@@ -4407,6 +4410,9 @@ app.delete('/api/files/:name', async (req, res) => {
 
 app.get('/api/files/:name', (req, res) => {
   const fileName = path.basename(req.params.name);
+  if (!fileName.endsWith('.md')) {
+    return res.status(400).send('only markdown files are allowed');
+  }
   const fullPath = path.join(OUTPUT_DIR, fileName);
 
   if (!fs.existsSync(fullPath)) {
