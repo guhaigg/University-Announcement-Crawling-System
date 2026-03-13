@@ -1427,6 +1427,9 @@ button.danger {
 
 /* Blog-Inspired Redesign */
 :root {
+  --left-rail-width: 190px;
+  --left-rail-gap: 14px;
+  --left-rail-space: calc(var(--left-rail-width) + var(--left-rail-gap) + 18px);
   --bg: #f3f5f9;
   --bg-soft: #f7f9fc;
   --paper: #ffffff;
@@ -1503,17 +1506,17 @@ body::after {
 }
 
 .container {
-  padding: 20px 18px 54px;
+  padding: 20px 18px 54px var(--left-rail-space);
 }
 
 .home-side-left {
-  left: 14px;
+  left: var(--left-rail-gap);
   top: 82px;
-  width: 190px;
+  width: var(--left-rail-width);
 }
 
 .home-center {
-  margin-left: 216px;
+  margin-left: 0;
   gap: 14px;
 }
 
@@ -1742,6 +1745,10 @@ button.danger {
 }
 
 @media (max-width: 1180px) {
+  .container {
+    padding-left: 18px;
+  }
+
   .home-side-left {
     position: static;
     width: 100%;
