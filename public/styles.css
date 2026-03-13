@@ -75,6 +75,13 @@ body::after {
   padding: 34px 18px 56px;
 }
 
+.intro-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 14px;
+  align-items: start;
+}
+
 h1 {
   margin: 0;
   font-family: var(--heading-font);
@@ -155,6 +162,7 @@ h1 {
   background:
     radial-gradient(circle at top right, rgba(221, 238, 237, 0.95), transparent 30%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 249, 243, 0.92));
+  margin-bottom: 0;
 }
 
 .hero-meta {
@@ -331,8 +339,8 @@ textarea {
 .module-side .side-panel {
   position: sticky;
   top: 16px;
-  padding: 16px;
-  border-radius: 20px;
+  padding: 14px;
+  border-radius: 18px;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 242, 235, 0.84));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
@@ -341,30 +349,33 @@ textarea {
 .side-panel h3 {
   margin: 0 0 8px;
   font-family: var(--heading-font);
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.25;
 }
 
 .side-panel .subtitle {
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .auth-card {
-  padding: 12px 18px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.82);
+  margin-bottom: 0;
 }
 
 .auth-info-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .auth-info-row span {
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.5;
 }
 
 .module-tabs button {
@@ -879,17 +890,17 @@ button.danger {
   margin: 8px 0 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .side-panel ul li {
   border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 242, 235, 0.88));
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -900,12 +911,16 @@ button.danger {
 
 .side-panel ul li strong {
   margin-right: auto;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .side-panel ul li button {
   width: auto;
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11px;
+  box-shadow: none;
 }
 
 .side-panel-divider {
@@ -1050,6 +1065,10 @@ button.danger {
 @media (max-width: 760px) {
   .container {
     padding: 16px 10px 24px;
+  }
+
+  .intro-grid {
+    grid-template-columns: 1fr;
   }
 
   .guide-grid {
