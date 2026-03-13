@@ -273,9 +273,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-13 23:48:56（Asia/Shanghai）
+- 最近审核时间：2026-03-13 23:56:32（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：main
-- 最近提交：5d6db2d style: add floating masthead and compact homepage layout
+- 最近提交：fe2ecfa refactor: dedupe homepage navigation and add scenario presets
 - 当前工作区变更数：3
 <!-- AUTO_REVIEW_END -->

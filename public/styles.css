@@ -221,6 +221,36 @@ h1 {
   background: linear-gradient(90deg, var(--accent), transparent);
 }
 
+.home-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+.home-side {
+  min-width: 0;
+}
+
+.home-center {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.home-center .card,
+.home-side .card {
+  margin-bottom: 0;
+}
+
+.side-floating-card {
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+}
+
 .hero-card {
   padding: 28px;
   background:
@@ -267,7 +297,7 @@ h1 {
 
 .feature-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -351,6 +381,38 @@ h1 {
   margin-top: 8px;
   padding-top: 10px;
   border-top: 1px dashed var(--line);
+}
+
+.function-drawer-card .module-tabs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.function-drawer-card .module-tabs button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  border-radius: 12px;
+  padding: 7px 11px;
+}
+
+.quick-guide-card .guide-grid {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.quick-guide-card .guide-item {
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.quick-guide-card .guide-item strong {
+  font-size: 16px;
+}
+
+.quick-guide-card .guide-item p {
+  font-size: 12px;
 }
 
 .guide-grid {
@@ -1193,6 +1255,34 @@ button.danger {
   }
 }
 
+@media (max-width: 1280px) {
+  .home-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .home-center {
+    order: 1;
+  }
+
+  .home-side-left {
+    order: 2;
+  }
+
+  .home-side-right {
+    order: 3;
+  }
+
+  .side-floating-card {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .function-drawer-card .module-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
   .masthead {
     position: static;
@@ -1271,6 +1361,10 @@ button.danger {
   .module-tabs button {
     width: 100%;
     justify-content: center;
+  }
+
+  .function-drawer-card .module-tabs {
+    grid-template-columns: 1fr;
   }
 
   .file-list li,

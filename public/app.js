@@ -1665,13 +1665,29 @@ function applyScenarioPreset(btn) {
   }
 }
 
+function scrollToModulePanel(moduleId) {
+  const safeModuleId = getSafeModuleId(moduleId);
+  const panel = document.getElementById(safeModuleId);
+  if (!panel) return;
+  const offsetTop = 92;
+  const targetTop = panel.getBoundingClientRect().top + window.scrollY - offsetTop;
+  window.scrollTo({
+    top: Math.max(0, targetTop),
+    behavior: 'smooth'
+  });
+}
+
 function handleModuleNavigation(btn) {
   if (!btn) return;
+  const shouldJump = btn.dataset.jump === 'true' || Boolean(btn.closest('#feature-grid'));
   applyScenarioPreset(btn);
   if (btn.dataset.module === 'news-query-module' && Object.prototype.hasOwnProperty.call(btn.dataset, 'focus')) {
     applyNewsQueryFocusUI(btn.dataset.focus);
   }
   switchModule(btn.dataset.module);
+  if (shouldJump) {
+    requestAnimationFrame(() => scrollToModulePanel(btn.dataset.module));
+  }
 }
 
 function bindModuleNavigation(container) {
@@ -3261,7 +3277,7 @@ if (functionDrawerToggle && functionDrawerBody) {
     const isHidden = functionDrawerBody.classList.contains('hidden');
     functionDrawerBody.classList.toggle('hidden', !isHidden);
     functionDrawerToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-    functionDrawerToggle.textContent = isHidden ? '收起功能目录' : '展开功能目录';
+    functionDrawerToggle.textContent = isHidden ? '收起' : '展开';
   });
 }
 
