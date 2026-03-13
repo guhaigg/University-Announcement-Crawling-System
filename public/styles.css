@@ -88,6 +88,7 @@ h1 {
   margin: 10px 0 18px;
   color: var(--muted);
   line-height: 1.75;
+  font-size: 13px;
 }
 
 .card {
@@ -173,7 +174,7 @@ h1 {
 
 .hero-subtitle {
   max-width: 760px;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .hero-badges {
@@ -185,12 +186,12 @@ h1 {
 .hero-badges span {
   display: inline-flex;
   align-items: center;
-  padding: 7px 14px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid rgba(31, 111, 120, 0.14);
   background: rgba(255, 255, 255, 0.85);
   color: var(--accent-ink);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .guide-grid {
@@ -217,7 +218,7 @@ h1 {
 .guide-item p {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -230,7 +231,7 @@ h1 {
 label {
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.02em;
   color: var(--muted);
   text-transform: none;
@@ -248,8 +249,8 @@ select,
 textarea {
   border: 1px solid rgba(112, 86, 65, 0.14);
   border-radius: 14px;
-  padding: 11px 13px;
-  font-size: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
   color: var(--text);
   background: rgba(255, 255, 255, 0.84);
   transition: border-color 0.24s ease, box-shadow 0.24s ease, transform 0.24s ease;
@@ -295,7 +296,7 @@ textarea {
   align-items: center;
   gap: 8px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .compact-select select {
@@ -324,6 +325,7 @@ textarea {
 .module-panel > .subtitle {
   max-width: 860px;
   margin-top: -2px;
+  font-size: 13px;
 }
 
 .module-side .side-panel {
@@ -334,6 +336,18 @@ textarea {
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 242, 235, 0.84));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.side-panel h3 {
+  margin: 0 0 8px;
+  font-family: var(--heading-font);
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.side-panel .subtitle {
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .auth-card {
@@ -350,7 +364,7 @@ textarea {
 
 .auth-info-row span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .module-tabs button {
@@ -360,8 +374,8 @@ textarea {
   color: var(--accent-ink);
   border: 1px solid rgba(31, 111, 120, 0.14);
   border-radius: 999px;
-  padding: 9px 16px;
-  font-size: 13px;
+  padding: 8px 14px;
+  font-size: 12px;
 }
 
 .module-tabs button:hover:not(:disabled) {
@@ -380,8 +394,8 @@ button {
   border-radius: 999px;
   background: var(--accent);
   color: #fff;
-  font-size: 13px;
-  padding: 10px 15px;
+  font-size: 12px;
+  padding: 9px 14px;
   cursor: pointer;
   transition: transform 0.2s ease, filter 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
   box-shadow: 0 8px 18px rgba(31, 111, 120, 0.18);
@@ -433,6 +447,8 @@ button.danger {
 .task-card p {
   margin: 6px 0;
   word-break: break-all;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .task-card a {
@@ -511,7 +527,7 @@ button.danger {
 
 .file-list span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   margin-left: auto;
 }
 
@@ -558,7 +574,7 @@ button.danger {
 
 .verify-subpanel h4 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text);
 }
 
@@ -622,7 +638,7 @@ button.danger {
 
 .preset-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   margin-left: auto;
 }
 
@@ -649,7 +665,7 @@ button.danger {
   gap: 4px;
   min-width: 190px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .scan-filters .check-row {
@@ -713,7 +729,7 @@ button.danger {
 }
 
 .scan-title {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.45;
   font-weight: 600;
 }
@@ -721,7 +737,7 @@ button.danger {
 .scan-date {
   color: var(--muted);
   margin-left: 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .scan-badge {
@@ -756,13 +772,13 @@ button.danger {
 .news-stat h4 {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .news-stat p {
   margin: 5px 0 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text);
 }
@@ -899,7 +915,7 @@ button.danger {
 }
 
 .quick-editing-tag {
-  font-size: 12px;
+  font-size: 11px;
   color: #0f766e;
   background: #ddf4f1;
   border-radius: 999px;
@@ -916,13 +932,13 @@ button.danger {
 
 .pager span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .pager button {
   width: auto;
   min-width: 74px;
-  padding: 8px 12px;
+  padding: 7px 11px;
 }
 
 .preview-panel {
@@ -933,7 +949,7 @@ button.danger {
 
 .preview-panel h3 {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .preview-panel pre {
