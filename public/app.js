@@ -98,6 +98,25 @@ const newsQueryPager = document.getElementById('news-query-pager');
 const newsViewerPanel = document.getElementById('news-viewer-panel');
 const newsViewerTitle = document.getElementById('news-viewer-title');
 const newsViewerFrame = document.getElementById('news-viewer-frame');
+const adjustmentCleanForm = document.getElementById('adjustment-clean-form');
+const adjustmentCleanSchool = document.getElementById('adjustment-clean-school');
+const adjustmentCleanMajor = document.getElementById('adjustment-clean-major');
+const adjustmentCleanYear = document.getElementById('adjustment-clean-year');
+const adjustmentCleanKeywords = document.getElementById('adjustment-clean-keywords');
+const adjustmentCleanLevel = document.getElementById('adjustment-clean-level');
+const adjustmentCleanLimit = document.getElementById('adjustment-clean-limit');
+const adjustmentCleanRunBtn = document.getElementById('adjustment-clean-run-btn');
+const adjustmentCleanExportBtn = document.getElementById('adjustment-clean-export-btn');
+const adjustmentCleanResult = document.getElementById('adjustment-clean-result');
+const adjustmentCleanSummary = document.getElementById('adjustment-clean-summary');
+const adjustmentCleanSourceFilter = document.getElementById('adjustment-clean-source-filter');
+const adjustmentCleanYearFilter = document.getElementById('adjustment-clean-year-filter');
+const adjustmentCleanKeywordFilter = document.getElementById('adjustment-clean-keyword-filter');
+const adjustmentCleanFilterReset = document.getElementById('adjustment-clean-filter-reset');
+const adjustmentCleanSelectAll = document.getElementById('adjustment-clean-select-all');
+const adjustmentCleanInvert = document.getElementById('adjustment-clean-invert');
+const adjustmentCleanList = document.getElementById('adjustment-clean-list');
+const adjustmentCleanPager = document.getElementById('adjustment-clean-pager');
 const newsQuickSchoolName = document.getElementById('newsQuickSchoolName');
 const newsQuickCollegeName = document.getElementById('newsQuickCollegeName');
 const newsQuickIncludeCollegePages = document.getElementById('newsQuickIncludeCollegePages');
@@ -122,6 +141,7 @@ let fileCache = [];
 let selectedFileNames = new Set();
 let adjustmentMatch = null;
 let newsQueryState = null;
+let adjustmentCleanState = null;
 let newsQuickSchools = [];
 let adjustmentQuickSchools = [];
 let editingNewsQuickId = '';
@@ -136,7 +156,8 @@ const paginationState = {
   adjustmentAnnouncement: { page: 1, pageSize: 10 },
   adjustmentCollegeHomepage: { page: 1, pageSize: 8 },
   adjustmentCollege: { page: 1, pageSize: 10 },
-  newsQuery: { page: 1, pageSize: 12 }
+  newsQuery: { page: 1, pageSize: 12 },
+  adjustmentClean: { page: 1, pageSize: 12 }
 };
 
 function escapeHtml(value) {
@@ -232,6 +253,14 @@ function normalizeCleaningLevel(value) {
   const text = String(value || '').trim().toLowerCase();
   if (text === 'loose' || text === 'strict') return text;
   return 'standard';
+}
+
+function normalizeAdjustmentCleanSource(value) {
+  return String(value || '').trim().toLowerCase() === 'muchong' ? 'muchong' : 'yanzhao';
+}
+
+function getAdjustmentCleanSourceLabel(value) {
+  return normalizeAdjustmentCleanSource(value) === 'muchong' ? '小木虫' : '研招网';
 }
 
 function getMarkdownOutputModeLabel(value) {
@@ -538,6 +567,154 @@ function renderNewsQueryResult(result) {
   renderNewsQueryList();
   refreshNewsQuerySummary();
   clearNewsViewer();
+}
+
+function getAdjustmentCleanSelectedSourcesFromForm() {
+  const boxes = Array.from(document.querySelectorAll('input[name="adjustment-clean-sources"]:checked'));
+  const values = boxes.map((box) => normalizeAdjustmentCleanSource(box.value));
+  return Array.from(new Set(values.length ? values : ['yanzhao', 'muchong']));
+}
+
+function extractAdjustmentCleanYear(item) {
+  const source = `${item?.publishedDate || ''} ${item?.dateHint || ''} ${item?.title || ''} ${item?.url || ''}`;
+  const match = String(source || '').match(/\b(20\d{2})\b/);
+  return match ? match[1] : '';
+}
+
+function updateAdjustmentCleanYearFilterOptions() {
+  if (!adjustmentCleanState || !adjustmentCleanYearFilter) return;
+  const years = Array.from(
+    new Set(
+      (adjustmentCleanState.items || [])
+        .map((item) => extractAdjustmentCleanYear(item))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => Number(b) - Number(a));
+  const current = String(adjustmentCleanYearFilter.value || '').trim();
+  adjustmentCleanYearFilter.innerHTML = '<option value="">全部年份</option>';
+  years.forEach((year) => {
+    const option = document.createElement('option');
+    option.value = year;
+    option.textContent = year;
+    adjustmentCleanYearFilter.appendChild(option);
+  });
+  adjustmentCleanYearFilter.value = years.includes(current) ? current : '';
+}
+
+function applyAdjustmentCleanFilters() {
+  if (!adjustmentCleanState) return [];
+  const sourceFilter = normalizeAdjustmentCleanSource(adjustmentCleanSourceFilter?.value || '');
+  const sourceRaw = String(adjustmentCleanSourceFilter?.value || '').trim();
+  const yearFilter = String(adjustmentCleanYearFilter?.value || '').trim();
+  const keywordTerms = getScanFilterTerms(adjustmentCleanKeywordFilter?.value || '');
+  const filtered = (adjustmentCleanState.items || []).filter((item) => {
+    if (sourceRaw && normalizeAdjustmentCleanSource(item.source) !== sourceFilter) return false;
+    if (yearFilter && extractAdjustmentCleanYear(item) !== yearFilter) return false;
+    if (!keywordTerms.length) return true;
+    const source = normalizeFilterText(
+      `${item.title || ''} ${item.url || ''} ${item.publishedDate || ''} ${item.excerpt || ''} ${(item.matchedKeywords || []).join(' ')} ${(item.quotaSnippets || []).join(
+        ' '
+      )}`
+    );
+    return keywordTerms.every((term) => source.includes(term));
+  });
+  adjustmentCleanState.filteredItems = filtered;
+  return filtered;
+}
+
+function getAdjustmentCleanSelectedItems() {
+  if (!adjustmentCleanState) return [];
+  const selectedSet = adjustmentCleanState.selectedIds instanceof Set ? adjustmentCleanState.selectedIds : new Set();
+  return (adjustmentCleanState.items || []).filter((item) => selectedSet.has(item.id));
+}
+
+function refreshAdjustmentCleanSummary() {
+  if (!adjustmentCleanState || !adjustmentCleanSummary) return;
+  const summary = adjustmentCleanState.summary || {};
+  const filteredCount = Array.isArray(adjustmentCleanState.filteredItems) ? adjustmentCleanState.filteredItems.length : 0;
+  const selectedCount = getAdjustmentCleanSelectedItems().length;
+  const sourceSummary = summary.sourceSummary || {};
+  adjustmentCleanSummary.textContent =
+    `共 ${summary.total || 0} 条，名额命中 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条，` +
+    `研招网 ${sourceSummary.yanzhao || 0} 条，小木虫 ${sourceSummary.muchong || 0} 条，` +
+    `当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。`;
+}
+
+function renderAdjustmentCleanList() {
+  if (!adjustmentCleanState || !adjustmentCleanList) return;
+  const filtered = Array.isArray(adjustmentCleanState.filteredItems) ? adjustmentCleanState.filteredItems : [];
+  const pageInfo = getPagedItems(filtered, 'adjustmentClean');
+  renderPager(adjustmentCleanPager, 'adjustmentClean', filtered.length);
+  if (!filtered.length) {
+    adjustmentCleanList.innerHTML = '<li class="empty">当前筛选条件下没有结果。</li>';
+    return;
+  }
+  adjustmentCleanList.innerHTML = pageInfo.pageItems
+    .map((item) => {
+      const selected = adjustmentCleanState.selectedIds?.has(item.id) ? 'checked' : '';
+      const sourceBadgeClass = normalizeAdjustmentCleanSource(item.source) === 'muchong' ? 'news-badge-day-before' : 'news-badge-yesterday';
+      const quotaText = Array.isArray(item.quotaNumbers) && item.quotaNumbers.length ? item.quotaNumbers.join(' / ') : '未识别';
+      const keywordText = Array.isArray(item.matchedKeywords) && item.matchedKeywords.length ? item.matchedKeywords.join(' / ') : '无';
+      const excerpt = escapeHtml(item.excerpt || '');
+      return `<li class="scan-item news-item">
+        <label>
+          <input type="checkbox" data-adjust-clean-id="${escapeHtml(item.id)}" ${selected} />
+          <div class="news-item-main">
+            <span class="scan-title">${escapeHtml(item.title || '(无标题)')}</span>
+            <span class="scan-badge ${sourceBadgeClass}">${escapeHtml(getAdjustmentCleanSourceLabel(item.source))}</span>
+            <span class="scan-date">日期：${escapeHtml(item.publishedDate || item.dateHint || '未知')}</span>
+            <span class="scan-date">名额提取：${escapeHtml(quotaText)}</span>
+            <span class="scan-date">关键词命中：${escapeHtml(keywordText)}</span>
+            ${excerpt ? `<span class="scan-date news-snippet">摘要：${excerpt}</span>` : ''}
+          </div>
+        </label>
+        <a href="${escapeHtml(item.url)}" target="_blank">打开链接</a>
+      </li>`;
+    })
+    .join('');
+}
+
+function rerenderAdjustmentClean(resetPage = false) {
+  if (!adjustmentCleanState) return;
+  if (resetPage) ensurePagerState('adjustmentClean').page = 1;
+  applyAdjustmentCleanFilters();
+  renderAdjustmentCleanList();
+  refreshAdjustmentCleanSummary();
+}
+
+function renderAdjustmentCleanResult(result) {
+  adjustmentCleanState = result
+    ? {
+        ...result,
+        items: Array.isArray(result.items) ? result.items : [],
+        filteredItems: [],
+        selectedIds: new Set()
+      }
+    : null;
+
+  ensurePagerState('adjustmentClean').page = 1;
+  if (!adjustmentCleanState) {
+    if (adjustmentCleanResult) adjustmentCleanResult.classList.add('hidden');
+    if (adjustmentCleanList) adjustmentCleanList.innerHTML = '';
+    if (adjustmentCleanSummary) adjustmentCleanSummary.textContent = '';
+    renderPager(adjustmentCleanPager, 'adjustmentClean', 0);
+    return;
+  }
+
+  adjustmentCleanState.items.forEach((item, index) => {
+    if (!item.id) {
+      item.id = `${normalizeAdjustmentCleanSource(item.source)}_${index}_${encodeURIComponent(item.url || '')}`;
+    }
+    if (index < 10) {
+      adjustmentCleanState.selectedIds.add(item.id);
+    }
+  });
+
+  if (adjustmentCleanResult) adjustmentCleanResult.classList.remove('hidden');
+  if (adjustmentCleanSourceFilter) adjustmentCleanSourceFilter.value = '';
+  if (adjustmentCleanKeywordFilter) adjustmentCleanKeywordFilter.value = '';
+  updateAdjustmentCleanYearFilterOptions();
+  rerenderAdjustmentClean(true);
 }
 
 function renderNewsQuickSchools() {
@@ -1955,6 +2132,135 @@ if (newsQueryList) {
   });
 }
 
+if (adjustmentCleanForm) {
+  adjustmentCleanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const schoolName = String(adjustmentCleanSchool?.value || '').trim();
+    if (!schoolName) {
+      showToast('请先填写院校名称', true);
+      return;
+    }
+    const payload = {
+      schoolName,
+      majorKeyword: String(adjustmentCleanMajor?.value || '').trim(),
+      targetYear: String(adjustmentCleanYear?.value || '').trim(),
+      keywords: String(adjustmentCleanKeywords?.value || '').trim(),
+      cleaningLevel: normalizeCleaningLevel(adjustmentCleanLevel?.value || 'standard'),
+      sources: getAdjustmentCleanSelectedSourcesFromForm(),
+      limit: Number(adjustmentCleanLimit?.value || 30)
+    };
+    try {
+      setButtonBusy(adjustmentCleanRunBtn, true, '抓取中...');
+      const data = await api('/api/adjustment-clean/query', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      renderAdjustmentCleanResult(data.result);
+      switchModule('adjustment-clean-module');
+      showToast(`清洗完成：共 ${data.result?.summary?.total || 0} 条`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentCleanRunBtn, false);
+    }
+  });
+}
+
+if (adjustmentCleanExportBtn) {
+  adjustmentCleanExportBtn.addEventListener('click', async () => {
+    if (!adjustmentCleanState) {
+      showToast('请先执行调剂数据清洗', true);
+      return;
+    }
+    const selectedItems = getAdjustmentCleanSelectedItems();
+    if (!selectedItems.length) {
+      showToast('请先勾选要导出的记录', true);
+      return;
+    }
+    try {
+      setButtonBusy(adjustmentCleanExportBtn, true, '导出中...');
+      const data = await api('/api/adjustment-clean/export', {
+        method: 'POST',
+        body: JSON.stringify({
+          result: {
+            query: adjustmentCleanState.query || {},
+            summary: adjustmentCleanState.summary || {},
+            items: adjustmentCleanState.items || []
+          },
+          selectedItems
+        })
+      });
+      await loadFiles();
+      showToast(`导出成功：${data.fileName || '已生成 Markdown'}`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentCleanExportBtn, false);
+    }
+  });
+}
+
+if (adjustmentCleanSourceFilter) {
+  adjustmentCleanSourceFilter.addEventListener('change', () => {
+    rerenderAdjustmentClean(true);
+  });
+}
+
+if (adjustmentCleanYearFilter) {
+  adjustmentCleanYearFilter.addEventListener('change', () => {
+    rerenderAdjustmentClean(true);
+  });
+}
+
+if (adjustmentCleanKeywordFilter) {
+  adjustmentCleanKeywordFilter.addEventListener('input', () => {
+    rerenderAdjustmentClean(true);
+  });
+}
+
+if (adjustmentCleanFilterReset) {
+  adjustmentCleanFilterReset.addEventListener('click', () => {
+    if (adjustmentCleanSourceFilter) adjustmentCleanSourceFilter.value = '';
+    if (adjustmentCleanYearFilter) adjustmentCleanYearFilter.value = '';
+    if (adjustmentCleanKeywordFilter) adjustmentCleanKeywordFilter.value = '';
+    rerenderAdjustmentClean(true);
+  });
+}
+
+if (adjustmentCleanSelectAll) {
+  adjustmentCleanSelectAll.addEventListener('click', () => {
+    if (!adjustmentCleanState) return;
+    (adjustmentCleanState.filteredItems || []).forEach((item) => adjustmentCleanState.selectedIds.add(item.id));
+    renderAdjustmentCleanList();
+    refreshAdjustmentCleanSummary();
+  });
+}
+
+if (adjustmentCleanInvert) {
+  adjustmentCleanInvert.addEventListener('click', () => {
+    if (!adjustmentCleanState) return;
+    (adjustmentCleanState.filteredItems || []).forEach((item) => {
+      if (adjustmentCleanState.selectedIds.has(item.id)) adjustmentCleanState.selectedIds.delete(item.id);
+      else adjustmentCleanState.selectedIds.add(item.id);
+    });
+    renderAdjustmentCleanList();
+    refreshAdjustmentCleanSummary();
+  });
+}
+
+if (adjustmentCleanList) {
+  adjustmentCleanList.addEventListener('change', (e) => {
+    if (!adjustmentCleanState) return;
+    const input = e.target.closest('input[type="checkbox"][data-adjust-clean-id]');
+    if (!input) return;
+    const id = String(input.dataset.adjustCleanId || '');
+    if (!id) return;
+    if (input.checked) adjustmentCleanState.selectedIds.add(id);
+    else adjustmentCleanState.selectedIds.delete(id);
+    refreshAdjustmentCleanSummary();
+  });
+}
+
 taskForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const submitBtn = e.submitter;
@@ -2293,6 +2599,10 @@ function handlePagerAction(key, action) {
   }
   if (key === 'newsQuery') {
     renderNewsQueryList();
+    return;
+  }
+  if (key === 'adjustmentClean') {
+    renderAdjustmentCleanList();
   }
 }
 
@@ -2311,6 +2621,7 @@ bindPagerEvents(adjustmentAnnouncementPager);
 bindPagerEvents(adjustmentCollegeHomepagePager);
 bindPagerEvents(adjustmentCollegePager);
 bindPagerEvents(newsQueryPager);
+bindPagerEvents(adjustmentCleanPager);
 
 scanConfirmBtn.addEventListener('click', async () => {
   if (!pendingScan) {

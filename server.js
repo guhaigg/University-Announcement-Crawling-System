@@ -63,6 +63,14 @@ const KEYWORD_SYNONYM_MAP = {
   招生: ['招生', '招考', '报名', '录取', '拟录取'],
   奖学金: ['奖学金', '助学金', '资助', '学业奖学金', '国家奖学金']
 };
+const ADJUSTMENT_SOURCE_HOSTS = {
+  yanzhao: 'yz.chsi.com.cn',
+  muchong: 'muchong.com'
+};
+const ADJUSTMENT_SOURCE_LABELS = {
+  yanzhao: '研招网',
+  muchong: '小木虫'
+};
 
 const scheduledJobs = new Map();
 const runningTasks = new Set();
@@ -781,6 +789,406 @@ function mergeKeywords(userKeywords, builtInKeywords) {
   return Array.from(
     new Set([...(Array.isArray(userKeywords) ? userKeywords : []), ...(Array.isArray(builtInKeywords) ? builtInKeywords : [])])
   ).filter(Boolean);
+}
+
+function normalizeAdjustmentSource(value) {
+  return String(value || '').trim().toLowerCase() === 'muchong' ? 'muchong' : 'yanzhao';
+}
+
+function normalizeAdjustmentSources(input) {
+  const raw = Array.isArray(input) ? input : parseKeywords(input);
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const source = normalizeAdjustmentSource(item);
+    if (seen.has(source)) continue;
+    seen.add(source);
+    out.push(source);
+  }
+  if (!out.length) return ['yanzhao', 'muchong'];
+  return out;
+}
+
+function getAdjustmentSourceLabel(source) {
+  const key = normalizeAdjustmentSource(source);
+  return ADJUSTMENT_SOURCE_LABELS[key] || key;
+}
+
+function extractAdjustmentYearText(value) {
+  const match = String(value || '').match(/\b(20\d{2})\b/);
+  return match ? match[1] : '';
+}
+
+function buildAdjustmentSearchQueries(options = {}, source = 'yanzhao') {
+  const schoolName = String(options.schoolName || '').trim();
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const extraKeywords = parseKeywords(options.keywords || '');
+  const host = ADJUSTMENT_SOURCE_HOSTS[normalizeAdjustmentSource(source)] || ADJUSTMENT_SOURCE_HOSTS.yanzhao;
+  const sourceLabel = getAdjustmentSourceLabel(source);
+
+  const baseTokens = [schoolName, majorKeyword, targetYear, '研究生', '调剂'].filter(Boolean);
+  const querySeeds = [
+    `${baseTokens.join(' ')} site:${host}`,
+    `${schoolName} ${majorKeyword || ''} 调剂 公告 site:${host}`.replace(/\s+/g, ' ').trim(),
+    `${schoolName} 研究生 调剂 名额 site:${host}`,
+    `${schoolName} 调剂 复试 site:${host}`,
+    `${schoolName} ${sourceLabel} 调剂 site:${host}`
+  ];
+  if (extraKeywords.length) {
+    querySeeds.unshift(`${schoolName} ${extraKeywords.slice(0, 3).join(' ')} 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+  }
+  return Array.from(new Set(querySeeds.map((x) => x.trim()).filter(Boolean))).slice(0, 6);
+}
+
+function scoreAdjustmentSearchItem(item, source, options = {}) {
+  const schoolName = String(options.schoolName || '').trim();
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const host = ADJUSTMENT_SOURCE_HOSTS[normalizeAdjustmentSource(source)] || '';
+  const combined = `${item.title || ''} ${item.url || ''} ${item.snippet || ''}`;
+  let score = 0;
+  if (schoolName && combined.includes(schoolName)) score += 48;
+  if (majorKeyword && combined.includes(majorKeyword)) score += 32;
+  if (targetYear && combined.includes(targetYear)) score += 14;
+  score += countHintHits(combined, ADJUSTMENT_HINTS) * 20;
+  score += countHintHits(combined, GRAD_ENTRY_HINTS) * 10;
+  score += countHintHits(combined, ADMISSION_SECTION_HINTS) * 8;
+  if (/名额|缺额|人数|计划|接收调剂|拟接收/.test(combined)) score += 12;
+  if (/复试|录取|分数线/.test(combined)) score += 8;
+  if (/经验|求助|请教|闲聊|八卦/.test(combined)) score -= 50;
+  if (/login|passport|cas/.test(String(item.url || '').toLowerCase())) score -= 40;
+
+  try {
+    const hostname = new URL(item.url).hostname.toLowerCase();
+    if (host && (hostname === host || hostname.endsWith(`.${host}`))) score += 34;
+    else score -= 60;
+    if (normalizeAdjustmentSource(source) === 'muchong') {
+      if (/muchong\.com\/t-\d+-\d+-page-\d+/.test(String(item.url || ''))) score += 20;
+      if (/html\/\d+\/\d+\.html/.test(String(item.url || ''))) score += 8;
+    }
+  } catch (error) {
+    score -= 20;
+  }
+  return score;
+}
+
+function extractAdjustmentQuota(text) {
+  const source = normalizeText(text || '');
+  if (!source) return { numbers: [], snippets: [] };
+  const patterns = [
+    /(?:接收|接受|招收|拟接收|预计接收|计划|剩余|缺额)[^\n，。；]{0,24}?(\d{1,3})\s*(?:名|人|个|名额)/g,
+    /(\d{1,3})\s*(?:名|人|个)\s*(?:调剂|名额|缺额)/g,
+    /(?:调剂|缺额|名额)[^\n，。；]{0,20}?(\d{1,3})/g
+  ];
+  const numbers = [];
+  const snippets = [];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(source))) {
+      const num = Number(match[1]);
+      if (!Number.isFinite(num) || num <= 0 || num > 500) continue;
+      numbers.push(num);
+      snippets.push(match[0]);
+    }
+  }
+  const uniqueNumbers = Array.from(new Set(numbers)).sort((a, b) => b - a);
+  const uniqueSnippets = Array.from(new Set(snippets)).slice(0, 8);
+  return { numbers: uniqueNumbers, snippets: uniqueSnippets };
+}
+
+function extractAdjustmentContacts(text) {
+  const source = normalizeText(text || '');
+  if (!source) return [];
+  const contacts = [];
+  const phoneMatches = source.match(/(?:1[3-9]\d{9}|0\d{2,3}-?\d{7,8})/g) || [];
+  const qqMatches = source.match(/(?:QQ|qq)[:：\s]*(\d{5,12})/g) || [];
+  const emailMatches = source.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || [];
+  [...phoneMatches, ...qqMatches, ...emailMatches].forEach((item) => {
+    const value = String(item || '').trim();
+    if (!value) return;
+    contacts.push(value);
+  });
+  return Array.from(new Set(contacts)).slice(0, 8);
+}
+
+function buildAdjustmentItemKey(item) {
+  return `${normalizeUrlForKey(item?.url || '')}::${normalizeMatchText(item?.title || '')}`;
+}
+
+function buildAdjustmentQueryKeywords(options = {}) {
+  const schoolName = String(options.schoolName || '').trim();
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const userKeywords = parseKeywords(options.keywords || '');
+  return Array.from(
+    new Set(
+      [schoolName, majorKeyword, targetYear, ...userKeywords, '调剂', '接收调剂', '缺额', '名额', '复试', '研究生招生'].filter((x) => String(x || '').trim())
+    )
+  );
+}
+
+async function searchAdjustmentCandidatesBySource(source, options = {}) {
+  const queries = buildAdjustmentSearchQueries(options, source);
+  const seen = new Set();
+  const allItems = [];
+  const limitPerQuery = Math.max(6, Math.min(12, Number(options.limitPerQuery) || 10));
+  for (const query of queries) {
+    const [bingItems, sogouItems] = await Promise.all([
+      searchBingWeb(query, limitPerQuery).catch(() => []),
+      searchSogouWeb(query, Math.max(4, limitPerQuery - 2)).catch(() => [])
+    ]);
+    for (const item of [...bingItems, ...sogouItems]) {
+      if (!isValidHttpUrl(item.url)) continue;
+      const key = normalizeUrlForKey(item.url);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      allItems.push({
+        source: normalizeAdjustmentSource(source),
+        sourceLabel: getAdjustmentSourceLabel(source),
+        title: normalizeText(item.title || ''),
+        url: item.url,
+        snippet: normalizeText(item.snippet || '')
+      });
+    }
+  }
+  const scored = allItems
+    .map((item, idx) => ({
+      ...item,
+      score: scoreAdjustmentSearchItem(item, source, options) + Math.max(0, 20 - idx)
+    }))
+    .filter((item) => item.score > -10)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(12, Math.min(40, Number(options.maxCandidatesPerSource) || 24)));
+  return scored;
+}
+
+async function enrichAdjustmentCandidate(candidate, options = {}, keywordMatchers = []) {
+  const cleaningLevel = normalizeCleaningLevel(options.cleaningLevel);
+  const detail = await fetchNoticeDetail({
+    title: candidate.title,
+    url: candidate.url,
+    dateHint: ''
+  });
+  const mergedRawText = normalizeText(`${detail.title || candidate.title}\n${detail.content || ''}`);
+  const cleanedContent = cleanExtractedContent(mergedRawText, {
+    level: cleaningLevel,
+    paragraphDedup: cleaningLevel === 'strict'
+  });
+  const keywordMatch = scoreKeywordMatches(`${detail.title || ''}\n${cleanedContent}`, keywordMatchers);
+  const quota = extractAdjustmentQuota(`${detail.title || ''}\n${cleanedContent}`);
+  const contacts = extractAdjustmentContacts(cleanedContent);
+  const publishedDate = extractPublishedDate({
+    title: detail.title || candidate.title || '',
+    url: detail.url || candidate.url,
+    dateHint: detail.dateHint || ''
+  });
+  const publishedDateText = publishedDate ? formatLocalDateKey(publishedDate) : '';
+  const adjustmentHits = countHintHits(`${detail.title || ''} ${cleanedContent}`, ADJUSTMENT_HINTS);
+  const relevanceScore =
+    (candidate.score || 0) +
+    (keywordMatch.keywordMatchScore || 0) +
+    adjustmentHits * 24 +
+    (quota.numbers.length ? 36 : 0) +
+    (contacts.length ? 8 : 0);
+  const excerpt = cleanedContent ? cleanedContent.slice(0, 360) : normalizeText(candidate.snippet || '').slice(0, 360);
+  return {
+    id: buildAdjustmentItemKey(detail),
+    source: candidate.source,
+    sourceLabel: candidate.sourceLabel,
+    title: detail.title || candidate.title || candidate.url,
+    url: detail.url || candidate.url,
+    publishedDate: publishedDateText,
+    dateHint: detail.dateHint || '',
+    matchedKeywords: keywordMatch.matchedKeywords || [],
+    keywordScore: keywordMatch.keywordMatchScore || 0,
+    adjustmentHits,
+    quotaNumbers: quota.numbers,
+    quotaSnippets: quota.snippets,
+    contacts,
+    attachments: Array.isArray(detail.attachments) ? detail.attachments : [],
+    excerpt: excerpt ? `${excerpt}${cleanedContent.length > 360 ? '...' : ''}` : '',
+    cleanedContent,
+    relevanceScore
+  };
+}
+
+async function runAdjustmentDataCleaning(options = {}) {
+  const schoolName = String(options.schoolName || '').trim();
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const keywords = parseKeywords(options.keywords || '');
+  const cleaningLevel = normalizeCleaningLevel(options.cleaningLevel);
+  const sources = normalizeAdjustmentSources(options.sources);
+  const limit = Math.max(5, Math.min(80, Number(options.limit) || 30));
+  if (!schoolName) {
+    throw new Error('请输入院校名称');
+  }
+
+  const keywordMatchers = buildKeywordMatchers(buildAdjustmentQueryKeywords({ schoolName, majorKeyword, targetYear, keywords }));
+  const sourceCandidates = await Promise.all(
+    sources.map(async (source) => {
+      const candidates = await searchAdjustmentCandidatesBySource(source, {
+        schoolName,
+        majorKeyword,
+        targetYear,
+        keywords,
+        limitPerQuery: 10,
+        maxCandidatesPerSource: Math.max(16, limit)
+      });
+      return { source, candidates };
+    })
+  );
+
+  const mergedCandidates = [];
+  const seen = new Set();
+  sourceCandidates.forEach((entry) => {
+    entry.candidates.forEach((candidate) => {
+      const key = normalizeUrlForKey(candidate.url);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      mergedCandidates.push(candidate);
+    });
+  });
+
+  const rankedCandidates = mergedCandidates
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(limit * 2, 24));
+
+  const items = [];
+  const itemMap = new Map();
+  for (const candidate of rankedCandidates) {
+    try {
+      const item = await enrichAdjustmentCandidate(candidate, { cleaningLevel }, keywordMatchers);
+      if (!item.title || !item.url) continue;
+      const keep =
+        item.adjustmentHits > 0 ||
+        item.keywordScore > 0 ||
+        item.quotaNumbers.length > 0 ||
+        (majorKeyword && `${item.title} ${item.cleanedContent}`.includes(majorKeyword));
+      if (!keep) continue;
+      const key = buildAdjustmentItemKey(item);
+      const old = itemMap.get(key);
+      if (!old || old.relevanceScore < item.relevanceScore) {
+        itemMap.set(key, item);
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+  items.push(...Array.from(itemMap.values()));
+
+  const finalItems = items
+    .sort((a, b) => {
+      if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+        return b.publishedDate.localeCompare(a.publishedDate);
+      }
+      return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+    })
+    .slice(0, limit);
+
+  const sourceSummary = {
+    yanzhao: finalItems.filter((x) => x.source === 'yanzhao').length,
+    muchong: finalItems.filter((x) => x.source === 'muchong').length
+  };
+  const summary = {
+    total: finalItems.length,
+    withQuota: finalItems.filter((x) => Array.isArray(x.quotaNumbers) && x.quotaNumbers.length > 0).length,
+    withAttachment: finalItems.filter((x) => Array.isArray(x.attachments) && x.attachments.length > 0).length,
+    sourceSummary
+  };
+
+  return {
+    checkedAt: nowIsoSafe(),
+    query: {
+      schoolName,
+      majorKeyword,
+      targetYear,
+      keywords,
+      cleaningLevel,
+      sources,
+      limit
+    },
+    summary,
+    items: finalItems
+  };
+}
+
+function buildAdjustmentCleaningMarkdown(result, selectedItems = []) {
+  const sourceResult = result || {};
+  const query = sourceResult.query || {};
+  const items = Array.isArray(selectedItems) && selectedItems.length ? selectedItems : Array.isArray(sourceResult.items) ? sourceResult.items : [];
+  const lines = [];
+  lines.push(`# 调剂数据清洗报告 - ${query.schoolName || '未命名院校'}`);
+  lines.push('');
+  lines.push(`- 生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`);
+  lines.push(`- 院校: ${query.schoolName || '-'}`);
+  lines.push(`- 专业关键词: ${query.majorKeyword || '-'}`);
+  lines.push(`- 年份: ${query.targetYear || '-'}`);
+  lines.push(`- 检索来源: ${(Array.isArray(query.sources) ? query.sources : []).map(getAdjustmentSourceLabel).join(' / ') || '-'}`);
+  lines.push(`- 清洗级别: ${normalizeCleaningLevel(query.cleaningLevel)}`);
+  lines.push(`- 关键词: ${Array.isArray(query.keywords) && query.keywords.length ? query.keywords.join(' / ') : '-'}`);
+  lines.push(`- 记录数: ${items.length}`);
+  lines.push('');
+  if (!items.length) {
+    lines.push('未检索到符合条件的调剂信息。');
+    return lines.join('\n');
+  }
+  items.forEach((item, idx) => {
+    lines.push(`## ${idx + 1}. ${item.title || '(无标题)'}`);
+    lines.push('');
+    lines.push(`- 来源: ${getAdjustmentSourceLabel(item.source)} (${item.source || '-'})`);
+    lines.push(`- 链接: ${item.url || '-'}`);
+    if (item.publishedDate) lines.push(`- 日期: ${item.publishedDate}`);
+    if (Array.isArray(item.quotaNumbers) && item.quotaNumbers.length) {
+      lines.push(`- 调剂名额提取: ${item.quotaNumbers.join(' / ')}`);
+    } else {
+      lines.push('- 调剂名额提取: 未识别');
+    }
+    if (Array.isArray(item.matchedKeywords) && item.matchedKeywords.length) {
+      lines.push(`- 关键词命中: ${item.matchedKeywords.join(' / ')}`);
+    }
+    if (Array.isArray(item.contacts) && item.contacts.length) {
+      lines.push(`- 联系方式: ${item.contacts.join('；')}`);
+    }
+    if (Array.isArray(item.attachments) && item.attachments.length) {
+      lines.push(`- 附件数: ${item.attachments.length}`);
+    }
+    lines.push('');
+    lines.push(item.excerpt || item.cleanedContent || '（未提取到正文摘要）');
+    if (Array.isArray(item.quotaSnippets) && item.quotaSnippets.length) {
+      lines.push('');
+      lines.push('### 名额命中片段');
+      lines.push('');
+      item.quotaSnippets.forEach((snippet, i) => {
+        lines.push(`${i + 1}. ${snippet}`);
+      });
+    }
+    if (Array.isArray(item.attachments) && item.attachments.length) {
+      lines.push('');
+      lines.push('### 附件链接');
+      lines.push('');
+      item.attachments.forEach((attachment, i) => {
+        lines.push(`${i + 1}. [${attachment.name || '附件'}](${attachment.url})`);
+      });
+    }
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+async function writeAdjustmentCleaningMarkdown(result, selectedItems = []) {
+  const query = result?.query || {};
+  const schoolName = sanitizeFilename(String(query.schoolName || '调剂数据'));
+  const fileName = `${schoolName}_调剂数据清洗_${nowFilenameStamp()}.md`;
+  const content = buildAdjustmentCleaningMarkdown(result, selectedItems);
+  const filePath = path.join(OUTPUT_DIR, fileName);
+  await fsp.writeFile(filePath, content, 'utf8');
+  return {
+    fileName,
+    fileNames: [fileName],
+    fileCount: 1
+  };
 }
 
 function countHintHits(text, hints) {
@@ -4226,6 +4634,36 @@ app.post('/api/graduate-news-check', async (req, res) => {
     res.json({ ok: true, result });
   } catch (error) {
     res.status(400).json({ error: error.message || '新公告查询失败' });
+  }
+});
+
+app.post('/api/adjustment-clean/query', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const result = await runAdjustmentDataCleaning({
+      schoolName: body.schoolName,
+      majorKeyword: body.majorKeyword,
+      targetYear: body.targetYear,
+      keywords: body.keywords,
+      cleaningLevel: body.cleaningLevel,
+      sources: body.sources,
+      limit: body.limit
+    });
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '调剂数据清洗失败' });
+  }
+});
+
+app.post('/api/adjustment-clean/export', async (req, res) => {
+  const body = req.body || {};
+  const result = body.result || {};
+  const selectedItems = Array.isArray(body.selectedItems) ? body.selectedItems : [];
+  try {
+    const output = await writeAdjustmentCleaningMarkdown(result, selectedItems);
+    res.json({ ok: true, ...output });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '调剂数据导出失败' });
   }
 });
 
