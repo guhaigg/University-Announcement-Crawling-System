@@ -549,6 +549,14 @@ function upsertQuickSchoolRecords(currentList, record, limit = 10) {
   return output.slice(0, limit);
 }
 
+function mergeQuickSchoolRecords(currentList, incomingList, limit = 10) {
+  let merged = Array.isArray(currentList) ? currentList.map(normalizeQuickRetestSchoolRecord) : [];
+  for (const record of Array.isArray(incomingList) ? incomingList : []) {
+    merged = upsertQuickSchoolRecords(merged, record, limit);
+  }
+  return merged.slice(0, limit);
+}
+
 function decorateManualPresets(presets) {
   const totalByName = new Map();
   for (const preset of presets) {
@@ -3812,6 +3820,22 @@ app.delete('/api/news-quick-schools/:id', async (req, res) => {
   res.json({ ok: true, schools: config.quickNewsSchools });
 });
 
+app.post('/api/news-quick-schools/sync', async (req, res) => {
+  const config = await readConfig();
+  const source = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools : [];
+  if (!source.length) {
+    return res.status(400).json({ error: '当前固定院校列表为空，无法同步' });
+  }
+  const before = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools.length : 0;
+  config.quickAdjustmentSchools = mergeQuickSchoolRecords(config.quickAdjustmentSchools || [], source, 10);
+  await writeConfig(config);
+  res.json({
+    ok: true,
+    syncedCount: Math.max(0, config.quickAdjustmentSchools.length - before),
+    schools: config.quickAdjustmentSchools
+  });
+});
+
 app.post('/api/graduate-news-batch', async (req, res) => {
   const body = req.body || {};
   const ids = Array.isArray(body.ids) ? body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
@@ -3871,6 +3895,23 @@ app.delete('/api/adjustment-quick-schools/:id', async (req, res) => {
   }
   await writeConfig(config);
   res.json({ ok: true, schools: config.quickAdjustmentSchools });
+});
+
+app.post('/api/adjustment-quick-schools/sync', async (req, res) => {
+  const config = await readConfig();
+  const source = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools : [];
+  if (!source.length) {
+    return res.status(400).json({ error: '当前固定院校列表为空，无法同步' });
+  }
+  const before = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools.length : 0;
+  config.quickNewsSchools = mergeQuickSchoolRecords(config.quickNewsSchools || [], source, 10);
+  config.quickRetestSchools = config.quickNewsSchools;
+  await writeConfig(config);
+  res.json({
+    ok: true,
+    syncedCount: Math.max(0, config.quickNewsSchools.length - before),
+    schools: config.quickNewsSchools
+  });
 });
 
 app.post('/api/graduate-assistant-batch', async (req, res) => {

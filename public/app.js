@@ -99,6 +99,7 @@ const newsQuickCollegeName = document.getElementById('newsQuickCollegeName');
 const newsQuickIncludeCollegePages = document.getElementById('newsQuickIncludeCollegePages');
 const newsQuickAddBtn = document.getElementById('news-quick-add-btn');
 const newsQuickCancelBtn = document.getElementById('news-quick-cancel-btn');
+const newsQuickSyncBtn = document.getElementById('news-quick-sync-btn');
 const newsQuickEditorTip = document.getElementById('news-quick-editor-tip');
 const newsQuickList = document.getElementById('news-quick-list');
 const adjustmentQuickSchoolName = document.getElementById('adjustmentQuickSchoolName');
@@ -106,6 +107,7 @@ const adjustmentQuickCollegeName = document.getElementById('adjustmentQuickColle
 const adjustmentQuickIncludeCollegePages = document.getElementById('adjustmentQuickIncludeCollegePages');
 const adjustmentQuickAddBtn = document.getElementById('adjustment-quick-add-btn');
 const adjustmentQuickCancelBtn = document.getElementById('adjustment-quick-cancel-btn');
+const adjustmentQuickSyncBtn = document.getElementById('adjustment-quick-sync-btn');
 const adjustmentQuickEditorTip = document.getElementById('adjustment-quick-editor-tip');
 const adjustmentQuickList = document.getElementById('adjustment-quick-list');
 const filePager = document.getElementById('file-pager');
@@ -582,6 +584,21 @@ async function loadAdjustmentQuickSchools() {
   const data = await api('/api/adjustment-quick-schools');
   adjustmentQuickSchools = Array.isArray(data.schools) ? data.schools : [];
   renderAdjustmentQuickSchools();
+}
+
+async function syncQuickSchools(sourceType) {
+  const source = sourceType === 'adjustment' ? 'adjustment' : 'news';
+  const targetLabel = source === 'adjustment' ? '新公告查询 / 复试检索' : '调剂智能导航';
+  const endpoint = source === 'adjustment' ? '/api/adjustment-quick-schools/sync' : '/api/news-quick-schools/sync';
+  const currentList = source === 'adjustment' ? adjustmentQuickSchools : newsQuickSchools;
+  if (!currentList.length) {
+    showToast('当前固定院校列表为空，无法同步', true);
+    return;
+  }
+  const data = await api(endpoint, { method: 'POST' });
+  await Promise.all([loadNewsQuickSchools(), loadAdjustmentQuickSchools()]);
+  const synced = Number(data.syncedCount || 0);
+  showToast(synced > 0 ? `已同步 ${synced} 所院校到${targetLabel}` : `目标模块已是最新，无需同步`);
 }
 
 function fillAdjustmentQueryFromQuick(item) {
@@ -1740,6 +1757,19 @@ if (newsQuickCancelBtn) {
   });
 }
 
+if (newsQuickSyncBtn) {
+  newsQuickSyncBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(newsQuickSyncBtn, true, '同步中...');
+      await syncQuickSchools('news');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(newsQuickSyncBtn, false);
+    }
+  });
+}
+
 if (newsQuickList) {
   newsQuickList.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-action]');
@@ -1813,6 +1843,19 @@ if (adjustmentQuickCancelBtn) {
     if (!editingAdjustmentQuickId && !adjustmentQuickSchoolName?.value?.trim() && !adjustmentQuickCollegeName?.value?.trim()) return;
     resetAdjustmentQuickEditor();
     showToast('已取消修改');
+  });
+}
+
+if (adjustmentQuickSyncBtn) {
+  adjustmentQuickSyncBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(adjustmentQuickSyncBtn, true, '同步中...');
+      await syncQuickSchools('adjustment');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentQuickSyncBtn, false);
+    }
   });
 }
 
