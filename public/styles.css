@@ -175,6 +175,18 @@ textarea {
   gap: 8px;
 }
 
+.compact-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.compact-select select {
+  min-width: 146px;
+}
+
 .module-tabs {
   display: flex;
   flex-wrap: wrap;

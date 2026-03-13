@@ -261,6 +261,14 @@
           </label>
 
           <label>
+            Markdown 输出方式
+            <select id="taskMarkdownOutputMode">
+              <option value="merged">合并输出为一个文件</option>
+              <option value="separate">分别输出为多个文件</option>
+            </select>
+          </label>
+
+          <label>
             每日抓取时间
             <input id="scheduleTime" type="time" value="08:00" required />
           </label>
@@ -329,6 +337,14 @@
             <input id="manualKeywords" placeholder="通知, 公告" />
           </label>
 
+          <label>
+            Markdown 输出方式
+            <select id="manualMarkdownOutputMode">
+              <option value="merged">合并输出为一个文件</option>
+              <option value="separate">分别输出为多个文件</option>
+            </select>
+          </label>
+
           <div class="actions">
             <button type="button" id="manual-verify-btn">核对链接</button>
             <button type="submit">扫描候选公告</button>
@@ -375,6 +391,13 @@
         <div class="actions">
           <button type="button" id="scan-select-all" class="muted">全选</button>
           <button type="button" id="scan-invert">反选</button>
+          <label class="compact-select">
+            <span>输出方式</span>
+            <select id="scan-markdown-output-mode">
+              <option value="merged">合并输出</option>
+              <option value="separate">分别输出</option>
+            </select>
+          </label>
           <button type="button" id="scan-confirm">确认爬取并生成文件</button>
           <button type="button" id="scan-clear" class="muted">清空候选</button>
         </div>

@@ -7,6 +7,8 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +55,7 @@ const KEYWORD_SYNONYM_MAP = {
 const scheduledJobs = new Map();
 const runningTasks = new Set();
 const sessions = new Map();
+const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(ROOT, 'public')));
@@ -367,6 +370,23 @@ function normalizeUrlForKey(value) {
   }
 }
 
+function normalizeMarkdownOutputMode(value) {
+  return String(value || '').trim() === 'separate' ? 'separate' : 'merged';
+}
+
+async function revealFileInOs(fullPath) {
+  const safePath = path.resolve(fullPath);
+  if (process.platform === 'darwin') {
+    await execFileAsync('open', ['-R', safePath]);
+    return;
+  }
+  if (process.platform === 'win32') {
+    await execFileAsync('explorer', ['/select,', safePath]);
+    return;
+  }
+  await execFileAsync('xdg-open', [path.dirname(safePath)]);
+}
+
 function normalizeCollegeUrls(input) {
   const tokens = parseUrlList(input);
   const urls = [];
@@ -441,6 +461,7 @@ function normalizeTaskRecord(taskLike) {
     announcementUrl: announcementCombined.urls[0] || '',
     announcementUrls: announcementCombined.urls,
     keywords: parseKeywords(task.keywords),
+    markdownOutputMode: normalizeMarkdownOutputMode(task.markdownOutputMode),
     crawlMode,
     includeCollegePages: normalizeIncludeCollegePages(task.includeCollegePages, crawlMode),
     collegeUrls: normalizeCollegeUrls(task.collegeUrls).urls
@@ -459,6 +480,7 @@ function normalizePresetRecord(presetLike) {
     announcementUrl: announcementCombined.urls[0] || '',
     announcementUrls: announcementCombined.urls,
     keywords: parseKeywords(preset.keywords),
+    markdownOutputMode: normalizeMarkdownOutputMode(preset.markdownOutputMode),
     crawlMode,
     includeCollegePages: normalizeIncludeCollegePages(preset.includeCollegePages, crawlMode),
     collegeUrls: normalizeCollegeUrls(preset.collegeUrls).urls,
@@ -487,6 +509,7 @@ function buildPresetDedupKey(presetLike) {
     normalizeUrlForKey(preset.homepageUrl),
     announcementKey || normalizeUrlForKey(preset.announcementUrl),
     preset.crawlMode,
+    preset.markdownOutputMode,
     preset.includeCollegePages ? '1' : '0',
     collegeKey
   ].join('::');
@@ -2837,6 +2860,7 @@ function buildManualPreset(taskLike) {
   const keywords = Array.isArray(taskLike.keywords) ? taskLike.keywords : parseKeywords(taskLike.keywords);
   const collegeUrls = normalizeCollegeUrls(taskLike.collegeUrls).urls;
   const crawlMode = normalizeCrawlMode(taskLike.crawlMode);
+  const markdownOutputMode = normalizeMarkdownOutputMode(taskLike.markdownOutputMode);
   const includeCollegePages = normalizeIncludeCollegePages(taskLike.includeCollegePages, crawlMode);
 
   if (!homepageUrl || !isValidHttpUrl(homepageUrl)) {
@@ -2850,6 +2874,7 @@ function buildManualPreset(taskLike) {
     announcementUrl,
     announcementUrls,
     keywords,
+    markdownOutputMode,
     crawlMode,
     includeCollegePages,
     collegeUrls,
@@ -2960,6 +2985,46 @@ function buildMarkdownWithContents(task, pageRefs, details, source) {
   return lines.join('\n');
 }
 
+function buildMarkdownForSingleNotice(task, pageRefs, detail, source) {
+  return buildMarkdownWithContents(task, pageRefs, [detail], source);
+}
+
+async function writeMarkdownOutputFiles(taskLike, details, pageRefList, source) {
+  const task = normalizeTaskRecord(taskLike);
+  const outputMode = normalizeMarkdownOutputMode(task.markdownOutputMode);
+  const stamp = nowFilenameStamp();
+
+  if (outputMode === 'separate') {
+    const fileNames = [];
+    for (let index = 0; index < details.length; index += 1) {
+      const detail = details[index];
+      const titlePart = sanitizeFilename(detail.title || `公告_${index + 1}`) || `公告_${index + 1}`;
+      const fileName = `${sanitizeFilename(task.schoolName)}_${String(index + 1).padStart(2, '0')}_${titlePart}_${stamp}.md`;
+      const filePath = path.join(OUTPUT_DIR, fileName);
+      const content = buildMarkdownForSingleNotice(task, pageRefList, detail, source);
+      await fsp.writeFile(filePath, content, 'utf8');
+      fileNames.push(fileName);
+    }
+    return {
+      outputMode,
+      fileName: fileNames[0] || '',
+      fileNames,
+      fileCount: fileNames.length
+    };
+  }
+
+  const content = buildMarkdownWithContents(task, pageRefList, details, source);
+  const fileName = `${sanitizeFilename(task.schoolName)}_${stamp}.md`;
+  const filePath = path.join(OUTPUT_DIR, fileName);
+  await fsp.writeFile(filePath, content, 'utf8');
+  return {
+    outputMode,
+    fileName,
+    fileNames: [fileName],
+    fileCount: 1
+  };
+}
+
 async function crawlSelectedNotices(taskLike, source, selectedItems, usedAnnouncementUrl = '', usedAnnouncementUrls = []) {
   const safeSelected = normalizeSelectedItems(selectedItems).slice(0, 20);
   if (!safeSelected.length) {
@@ -3003,13 +3068,13 @@ async function crawlSelectedNotices(taskLike, source, selectedItems, usedAnnounc
     pageRefList.push(value);
   }
 
-  const content = buildMarkdownWithContents(task, pageRefList, details, source);
-  const fileName = `${sanitizeFilename(taskLike.schoolName)}_${nowFilenameStamp()}.md`;
-  const filePath = path.join(OUTPUT_DIR, fileName);
-  await fsp.writeFile(filePath, content, 'utf8');
+  const outputResult = await writeMarkdownOutputFiles(task, details, pageRefList, source);
 
   return {
-    fileName,
+    fileName: outputResult.fileName,
+    fileNames: outputResult.fileNames,
+    fileCount: outputResult.fileCount,
+    outputMode: outputResult.outputMode,
     matchedCount: details.length,
     usedAnnouncementUrl: pageRefList[0] || usedAnnouncementUrl || '',
     usedAnnouncementUrls: pageRefList,
@@ -3150,6 +3215,7 @@ async function runTask(taskId, source = 'manual') {
     task.lastRunAt = nowIsoSafe();
     task.lastError = '';
     task.lastResultFile = result.fileName;
+    task.lastResultFiles = Array.isArray(result.fileNames) ? result.fileNames : result.fileName ? [result.fileName] : [];
     task.lastMatchedCount = result.matchedCount;
     task.updatedAt = nowIsoSafe();
 
@@ -3293,6 +3359,7 @@ app.post('/api/tasks', async (req, res) => {
   const scheduleTime = String(body.scheduleTime || '08:00').trim();
   const enabled = body.enabled !== false;
   const keywords = parseKeywords(body.keywords);
+  const markdownOutputMode = normalizeMarkdownOutputMode(body.markdownOutputMode);
   const collegeParsed = normalizeCollegeUrls(body.collegeUrls);
   const collegeUrls = collegeParsed.urls;
   const crawlMode = normalizeCrawlMode(body.crawlMode);
@@ -3333,6 +3400,7 @@ app.post('/api/tasks', async (req, res) => {
       scheduleTime,
       enabled,
       keywords,
+      markdownOutputMode,
       crawlMode,
       includeCollegePages,
       collegeUrls,
@@ -3349,6 +3417,7 @@ app.post('/api/tasks', async (req, res) => {
       scheduleTime,
       enabled,
       keywords,
+      markdownOutputMode,
       crawlMode,
       includeCollegePages,
       collegeUrls,
@@ -3357,6 +3426,7 @@ app.post('/api/tasks', async (req, res) => {
       lastRunAt: '',
       lastError: '',
       lastResultFile: '',
+      lastResultFiles: [],
       lastMatchedCount: 0
     };
     config.tasks.push(task);
@@ -3412,7 +3482,7 @@ app.post('/api/tasks/:id/scan', async (req, res) => {
   try {
     const normalizedTask = normalizeTaskRecord(task);
     const scan = await scanAnnouncementCandidates(normalizedTask);
-    res.json({ ok: true, taskId: id, scan });
+    res.json({ ok: true, taskId: id, task: normalizedTask, scan });
   } catch (error) {
     res.status(400).json({ error: error.message || '扫描失败' });
   }
@@ -3433,12 +3503,20 @@ app.post('/api/tasks/:id/confirm', async (req, res) => {
 
   try {
     const task = config.tasks[idx];
+    const markdownOutputMode = normalizeMarkdownOutputMode(body.markdownOutputMode || task.markdownOutputMode);
     const fallbackUsedUrls = usedAnnouncementUrls.length ? usedAnnouncementUrls : task.announcementUrls || [];
-    const result = await crawlSelectedNotices(task, 'manual', selectedItems, usedAnnouncementUrl || task.announcementUrl, fallbackUsedUrls);
+    const result = await crawlSelectedNotices(
+      { ...task, markdownOutputMode },
+      'manual',
+      selectedItems,
+      usedAnnouncementUrl || task.announcementUrl,
+      fallbackUsedUrls
+    );
 
     task.lastRunAt = nowIsoSafe();
     task.lastError = '';
     task.lastResultFile = result.fileName;
+    task.lastResultFiles = Array.isArray(result.fileNames) ? result.fileNames : result.fileName ? [result.fileName] : [];
     task.lastMatchedCount = result.matchedCount;
     task.updatedAt = nowIsoSafe();
     config.tasks[idx] = task;
@@ -3475,6 +3553,7 @@ app.post('/api/manual-scan', async (req, res) => {
   const announcementUrl = announcementParsed.urls[0] || '';
   const announcementUrls = announcementParsed.urls;
   const keywords = parseKeywords(body.keywords);
+  const markdownOutputMode = normalizeMarkdownOutputMode(body.markdownOutputMode);
   const collegeParsed = normalizeCollegeUrls(body.collegeUrls);
   const collegeUrls = collegeParsed.urls;
   const crawlMode = normalizeCrawlMode(body.crawlMode);
@@ -3498,6 +3577,7 @@ app.post('/api/manual-scan', async (req, res) => {
       announcementUrl,
       announcementUrls,
       keywords,
+      markdownOutputMode,
       crawlMode,
       includeCollegePages,
       collegeUrls
@@ -3518,6 +3598,7 @@ app.post('/api/manual-confirm', async (req, res) => {
   const announcementUrl = announcementParsed.urls[0] || '';
   const announcementUrls = announcementParsed.urls;
   const keywords = parseKeywords(body.keywords);
+  const markdownOutputMode = normalizeMarkdownOutputMode(body.markdownOutputMode);
   const collegeParsed = normalizeCollegeUrls(body.collegeUrls);
   const collegeUrls = collegeParsed.urls;
   const crawlMode = normalizeCrawlMode(body.crawlMode);
@@ -3544,13 +3625,20 @@ app.post('/api/manual-confirm', async (req, res) => {
       announcementUrl,
       announcementUrls,
       keywords,
+      markdownOutputMode,
       crawlMode,
       includeCollegePages,
       collegeUrls
     };
     await saveManualPreset(crawlTask);
     const fallbackUsedUrls = usedAnnouncementUrls.length ? usedAnnouncementUrls : announcementUrls;
-    const result = await crawlSelectedNotices(crawlTask, 'manual', selectedItems, usedAnnouncementUrl || announcementUrl, fallbackUsedUrls);
+    const result = await crawlSelectedNotices(
+      crawlTask,
+      'manual',
+      selectedItems,
+      usedAnnouncementUrl || announcementUrl,
+      fallbackUsedUrls
+    );
     res.json({ ok: true, result });
   } catch (error) {
     res.status(400).json({ error: error.message || '确认爬取失败' });
@@ -3565,6 +3653,7 @@ app.post('/api/manual-crawl', async (req, res) => {
   const announcementUrl = announcementParsed.urls[0] || '';
   const announcementUrls = announcementParsed.urls;
   const keywords = parseKeywords(body.keywords);
+  const markdownOutputMode = normalizeMarkdownOutputMode(body.markdownOutputMode);
   const collegeParsed = normalizeCollegeUrls(body.collegeUrls);
   const collegeUrls = collegeParsed.urls;
   const crawlMode = normalizeCrawlMode(body.crawlMode);
@@ -3588,6 +3677,7 @@ app.post('/api/manual-crawl', async (req, res) => {
       announcementUrl,
       announcementUrls,
       keywords,
+      markdownOutputMode,
       crawlMode,
       includeCollegePages,
       collegeUrls
@@ -3957,6 +4047,23 @@ app.get('/api/files/:name/content', async (req, res) => {
 
   const content = await fsp.readFile(fullPath, 'utf8');
   res.json({ name: fileName, content });
+});
+
+app.post('/api/files/:name/reveal', async (req, res) => {
+  const fileName = path.basename(req.params.name);
+  if (!fileName.endsWith('.md')) {
+    return res.status(400).json({ error: '仅支持定位 Markdown 文件' });
+  }
+  const fullPath = path.join(OUTPUT_DIR, fileName);
+  if (!fs.existsSync(fullPath)) {
+    return res.status(404).json({ error: 'file not found' });
+  }
+  try {
+    await revealFileInOs(fullPath);
+    res.json({ ok: true, fileName, fullPath });
+  } catch (error) {
+    res.status(500).json({ error: error.message || '打开本地文件失败' });
+  }
 });
 
 app.delete('/api/files/:name', async (req, res) => {

@@ -23,9 +23,11 @@ const previewContent = document.getElementById('preview-content');
 const taskCrawlMode = document.getElementById('crawlMode');
 const taskIncludeCollegePages = document.getElementById('includeCollegePages');
 const taskCollegeUrls = document.getElementById('collegeUrls');
+const taskMarkdownOutputMode = document.getElementById('taskMarkdownOutputMode');
 const manualCrawlMode = document.getElementById('manualCrawlMode');
 const manualIncludeCollegePages = document.getElementById('manualIncludeCollegePages');
 const manualCollegeUrls = document.getElementById('manualCollegeUrls');
+const manualMarkdownOutputMode = document.getElementById('manualMarkdownOutputMode');
 const manualPresetList = document.getElementById('manual-preset-list');
 const presetSelectAllBtn = document.getElementById('preset-select-all');
 const presetInvertBtn = document.getElementById('preset-invert');
@@ -47,6 +49,7 @@ const scanClearBtn = document.getElementById('scan-clear');
 const scanFilterKeyword = document.getElementById('scan-filter-keyword');
 const scanFilterYear = document.getElementById('scan-filter-year');
 const scanFilterResetBtn = document.getElementById('scan-filter-reset');
+const scanMarkdownOutputMode = document.getElementById('scan-markdown-output-mode');
 const scanPager = document.getElementById('scan-pager');
 const verifyCollegePanel = document.getElementById('verify-college-panel');
 const verifyCollegeList = document.getElementById('verify-college-list');
@@ -215,6 +218,14 @@ function normalizeMode(mode) {
   return mode === 'graduate_adjustment' ? 'graduate_adjustment' : 'general';
 }
 
+function normalizeMarkdownOutputMode(value) {
+  return String(value || '').trim() === 'separate' ? 'separate' : 'merged';
+}
+
+function getMarkdownOutputModeLabel(value) {
+  return normalizeMarkdownOutputMode(value) === 'separate' ? '分别输出' : '合并输出';
+}
+
 function normalizeIncludeCollegePages(value, mode) {
   if (typeof value === 'boolean') return value;
   return normalizeMode(mode) === 'graduate_adjustment';
@@ -340,6 +351,20 @@ function clearNewsViewer() {
   newsViewerPanel.classList.add('hidden');
   newsViewerTitle.textContent = '页内浏览';
   newsViewerFrame.src = 'about:blank';
+}
+
+function getResultFileMessage(result) {
+  const fileNames = Array.isArray(result?.fileNames) ? result.fileNames.filter(Boolean) : [];
+  if (fileNames.length > 1) {
+    return `已生成 ${fileNames.length} 个文件`;
+  }
+  if (fileNames.length === 1) {
+    return `已生成文件：${fileNames[0]}`;
+  }
+  if (result?.fileName) {
+    return `已生成文件：${result.fileName}`;
+  }
+  return 'Markdown 文件已生成';
 }
 
 function applyNewsQueryFilters() {
@@ -1017,6 +1042,14 @@ function renderTaskCard(task) {
   const safeKeywords = task.keywords?.length ? escapeHtml(task.keywords.join(' / ')) : '无（抓取最新公告）';
   const safeError = escapeHtml(task.lastError || '');
   const schoolAttr = encodeURIComponent(task.schoolName || '');
+  const outputModeText = getMarkdownOutputModeLabel(task.markdownOutputMode);
+  const lastResultFiles = Array.isArray(task.lastResultFiles) ? task.lastResultFiles : [];
+  const fileText =
+    lastResultFiles.length > 1
+      ? `${lastResultFiles.length} 个文件（首个：<a href="/api/files/${encodeURIComponent(lastResultFiles[0])}" target="_blank">${escapeHtml(
+          lastResultFiles[0]
+        )}</a>）`
+      : fileLink;
 
   return `
     <article class="task-card">
@@ -1027,15 +1060,18 @@ function renderTaskCard(task) {
       <p><strong>官网：</strong><a href="${safeHomepage}" target="_blank">${safeHomepage}</a></p>
       <p><strong>公告页：</strong>${task.announcementUrl ? `<a href="${safeAnnouncement}" target="_blank">${safeAnnouncement}</a>${announcementText ? `（${escapeHtml(announcementText)}）` : ''}` : '自动发现'}</p>
       <p><strong>模式：</strong>${getModeLabel(crawlMode)}${crawlMode === 'graduate_adjustment' ? ` / 学院层级${includeCollegePages ? '开启' : '关闭'}` : ''}</p>
+      <p><strong>输出：</strong>${outputModeText}</p>
       <p><strong>学院链接：</strong>${collegeCount ? `${collegeCount} 个` : '自动发现'}</p>
       <p><strong>关键词：</strong>${safeKeywords}</p>
       <p><strong>每日时间：</strong>${task.scheduleTime}</p>
       <p><strong>上次执行：</strong>${toLocalText(task.lastRunAt)}</p>
       <p><strong>上次抓取：</strong>${matched} 条</p>
-      <p><strong>上次文件：</strong>${fileLink}</p>
+      <p><strong>上次文件：</strong>${fileText}</p>
       <p class="error-text">${safeError}</p>
       <div class="task-actions">
-        <button data-action="scan" data-id="${task.id}" data-school="${schoolAttr}">扫描候选公告</button>
+        <button data-action="scan" data-id="${task.id}" data-school="${schoolAttr}" data-output-mode="${encodeURIComponent(
+          normalizeMarkdownOutputMode(task.markdownOutputMode)
+        )}">扫描候选公告</button>
         <button data-action="toggle" data-id="${task.id}" data-enabled="${task.enabled}">${task.enabled ? '暂停每日爬取' : '开启每日爬取'}</button>
         <button data-action="edit" data-id="${task.id}">编辑</button>
         <button data-action="delete" data-id="${task.id}" class="danger">删除</button>
@@ -1053,6 +1089,7 @@ function fillTaskForm(task) {
   document.getElementById('keywords').value = task.keywords?.join(', ') || '';
   document.getElementById('scheduleTime').value = task.scheduleTime || '08:00';
   document.getElementById('enabled').checked = task.enabled !== false;
+  if (taskMarkdownOutputMode) taskMarkdownOutputMode.value = normalizeMarkdownOutputMode(task.markdownOutputMode);
   taskCollegeUrls.value = Array.isArray(task.collegeUrls) ? task.collegeUrls.join('\n') : '';
   taskCrawlMode.value = crawlMode;
   taskIncludeCollegePages.checked = normalizeIncludeCollegePages(task.includeCollegePages, crawlMode);
@@ -1064,6 +1101,7 @@ function resetTaskForm() {
   document.getElementById('task-id').value = '';
   document.getElementById('scheduleTime').value = '08:00';
   document.getElementById('enabled').checked = true;
+  if (taskMarkdownOutputMode) taskMarkdownOutputMode.value = 'merged';
   taskCollegeUrls.value = '';
   taskCrawlMode.value = 'general';
   taskIncludeCollegePages.checked = false;
@@ -1088,6 +1126,9 @@ function clearPendingScan() {
   if (scanFilterYear) {
     scanFilterYear.innerHTML = '<option value="">全部年份</option>';
     scanFilterYear.value = '';
+  }
+  if (scanMarkdownOutputMode) {
+    scanMarkdownOutputMode.value = 'merged';
   }
   if (activeModuleId === 'scan-panel') {
     switchModule('manual-module');
@@ -1171,7 +1212,8 @@ function refreshPendingScanSummary() {
   const totalCount = pendingScan.candidates.length;
   const selectedCount = pendingScan.selectedKeys ? pendingScan.selectedKeys.size : 0;
   const summary = `来源：${pendingScan.contextText} | 模式：${getModeLabel(pendingScan.crawlMode)}${pendingScan.crawlMode === 'graduate_adjustment' ? ` / 学院层级${pendingScan.includeCollegePages ? '开启' : '关闭'}` : ''} | 公告页：${pageSummary} | 显示：${visibleCount}/${totalCount} | 分页：${pageState.page}/${pageState.totalPages} | 已勾选：${selectedCount} | 关键词命中：${pendingScan.matchedByKeywords ?? 0}${pendingScan.selectedCollegeCount ? ` | 指定学院：${pendingScan.selectedCollegeCount}` : ''}`;
-  scanInfo.textContent = summary;
+  const outputText = ` | 输出：${getMarkdownOutputModeLabel(pendingScan.markdownOutputMode)}`;
+  scanInfo.textContent = `${summary}${outputText}`;
 }
 
 function rerenderPendingScanByFilters(resetPage = false) {
@@ -1191,6 +1233,7 @@ function renderPendingScan(contextText, scan, mode, extra = {}) {
     mode,
     taskId: extra.taskId || '',
     payload: extra.payload || null,
+    markdownOutputMode: normalizeMarkdownOutputMode(extra.markdownOutputMode || extra.payload?.markdownOutputMode || 'merged'),
     usedAnnouncementUrl: scan.usedAnnouncementUrl || '',
     usedAnnouncementUrls,
     crawlMode: normalizeMode(scan.crawlMode),
@@ -1215,6 +1258,9 @@ function renderPendingScan(contextText, scan, mode, extra = {}) {
   });
 
   scanPanel.classList.remove('hidden');
+  if (scanMarkdownOutputMode) {
+    scanMarkdownOutputMode.value = pendingScan.markdownOutputMode;
+  }
   if (scanFilterKeyword) scanFilterKeyword.value = '';
   ensurePagerState('scan').page = 1;
   updateScanYearFilterOptions();
@@ -1281,6 +1327,7 @@ function renderFilesPage() {
         <input type="checkbox" data-file-checkbox="true" data-name="${encodeURIComponent(f.name)}" ${checked} />
         <a href="/api/files/${encodeURIComponent(f.name)}" target="_blank">${escapeHtml(f.name)}</a>
         <span>${sizeKb}KB / ${toLocalText(f.updatedAt)}</span>
+        <button type="button" data-action="reveal-file" data-name="${encodeURIComponent(f.name)}" class="muted">查看本地</button>
         <button type="button" data-action="preview-file" data-name="${encodeURIComponent(f.name)}">预览</button>
         <button type="button" data-action="delete-file" data-name="${encodeURIComponent(f.name)}" class="danger">删除</button>
       </li>`;
@@ -1346,12 +1393,13 @@ async function loadManualPresets() {
       const includeCollege = normalizeIncludeCollegePages(preset.includeCollegePages, mode);
       const keywords = Array.isArray(preset.keywords) && preset.keywords.length ? preset.keywords.join(' / ') : '无关键词';
       const collegeCount = Array.isArray(preset.collegeUrls) ? preset.collegeUrls.length : 0;
+      const outputMode = getMarkdownOutputModeLabel(preset.markdownOutputMode);
       return `<li>
         <input type="checkbox" data-preset-checkbox="true" data-id="${preset.id}" />
         <strong>${escapeHtml(preset.displayName || preset.schoolName || '未命名院校')}</strong>
         <button type="button" data-action="apply-preset" data-id="${preset.id}">套用</button>
         <button type="button" data-action="delete-preset" data-id="${preset.id}" class="danger">删除</button>
-        <span class="preset-meta">${getModeLabel(mode)}${mode === 'graduate_adjustment' ? ` / 学院层级${includeCollege ? '开' : '关'}` : ''} / 学院链接${collegeCount}个 / ${escapeHtml(keywords)}</span>
+        <span class="preset-meta">${getModeLabel(mode)}${mode === 'graduate_adjustment' ? ` / 学院层级${includeCollege ? '开' : '关'}` : ''} / ${outputMode} / 学院链接${collegeCount}个 / ${escapeHtml(keywords)}</span>
       </li>`;
     })
     .join('');
@@ -1364,6 +1412,7 @@ function fillManualFromPreset(preset) {
   document.getElementById('manualAnnouncementUrl').value = preset.announcementUrl || '';
   manualCollegeUrls.value = Array.isArray(preset.collegeUrls) ? preset.collegeUrls.join('\n') : '';
   document.getElementById('manualKeywords').value = Array.isArray(preset.keywords) ? preset.keywords.join(', ') : '';
+  if (manualMarkdownOutputMode) manualMarkdownOutputMode.value = normalizeMarkdownOutputMode(preset.markdownOutputMode);
   manualCrawlMode.value = mode;
   manualIncludeCollegePages.checked = normalizeIncludeCollegePages(preset.includeCollegePages, mode);
   updateCollegeToggleByMode(manualCrawlMode, manualIncludeCollegePages);
@@ -1851,6 +1900,7 @@ taskForm.addEventListener('submit', async (e) => {
     announcementUrl: document.getElementById('announcementUrl').value.trim(),
     collegeUrls: taskCollegeUrls.value.trim(),
     keywords: document.getElementById('keywords').value.trim(),
+    markdownOutputMode: normalizeMarkdownOutputMode(taskMarkdownOutputMode?.value || 'merged'),
     scheduleTime: document.getElementById('scheduleTime').value,
     enabled: document.getElementById('enabled').checked,
     crawlMode,
@@ -1884,6 +1934,7 @@ manualForm.addEventListener('submit', async (e) => {
     announcementUrl: document.getElementById('manualAnnouncementUrl').value.trim(),
     collegeUrls: manualCollegeUrls.value.trim(),
     keywords: document.getElementById('manualKeywords').value.trim(),
+    markdownOutputMode: normalizeMarkdownOutputMode(manualMarkdownOutputMode?.value || 'merged'),
     crawlMode,
     includeCollegePages: normalizeIncludeCollegePages(manualIncludeCollegePages.checked, crawlMode)
   };
@@ -2036,7 +2087,10 @@ taskList.addEventListener('click', async (e) => {
       setButtonBusy(btn, true, '扫描中...');
       const data = await api(`/api/tasks/${id}/scan`, { method: 'POST' });
       const school = btn.dataset.school ? decodeURIComponent(btn.dataset.school) : id;
-      renderPendingScan(`任务：${school}`, data.scan, 'task', { taskId: id });
+      renderPendingScan(`任务：${school}`, data.scan, 'task', {
+        taskId: id,
+        markdownOutputMode: data.task?.markdownOutputMode || btn.dataset.outputMode || 'merged'
+      });
       showToast('候选链接已生成，请勾选后确认爬取');
       return;
     }
@@ -2136,6 +2190,14 @@ if (scanFilterResetBtn) {
   });
 }
 
+if (scanMarkdownOutputMode) {
+  scanMarkdownOutputMode.addEventListener('change', () => {
+    if (!pendingScan) return;
+    pendingScan.markdownOutputMode = normalizeMarkdownOutputMode(scanMarkdownOutputMode.value);
+    refreshPendingScanSummary();
+  });
+}
+
 function handlePagerAction(key, action) {
   const state = ensurePagerState(key);
   if (action === 'prev') state.page -= 1;
@@ -2196,29 +2258,33 @@ scanConfirmBtn.addEventListener('click', async () => {
 
   try {
     setButtonBusy(scanConfirmBtn, true, '正文爬取中...');
+    const markdownOutputMode = normalizeMarkdownOutputMode(scanMarkdownOutputMode?.value || pendingScan.markdownOutputMode || 'merged');
+    pendingScan.markdownOutputMode = markdownOutputMode;
 
     if (pendingScan.mode === 'manual') {
       const data = await api('/api/manual-confirm', {
         method: 'POST',
         body: JSON.stringify({
           ...pendingScan.payload,
+          markdownOutputMode,
           usedAnnouncementUrl: pendingScan.usedAnnouncementUrl,
           usedAnnouncementUrls: pendingScan.usedAnnouncementUrls || [],
           selectedItems
         })
       });
-      showToast(`已生成文件：${data.result.fileName}`);
+      showToast(getResultFileMessage(data.result));
       await loadManualPresets();
     } else {
       const data = await api(`/api/tasks/${pendingScan.taskId}/confirm`, {
         method: 'POST',
         body: JSON.stringify({
+          markdownOutputMode,
           usedAnnouncementUrl: pendingScan.usedAnnouncementUrl,
           usedAnnouncementUrls: pendingScan.usedAnnouncementUrls || [],
           selectedItems
         })
       });
-      showToast(`已生成文件：${data.result.fileName}`);
+      showToast(getResultFileMessage(data.result));
     }
 
     clearPendingScan();
@@ -2307,6 +2373,19 @@ fileList.addEventListener('click', async (e) => {
 
   if (action === 'delete-file') {
     await deleteFilesByNames([name], btn, `已删除文件：${name}`);
+    return;
+  }
+
+  if (action === 'reveal-file') {
+    try {
+      setButtonBusy(btn, true, '打开中...');
+      await api(`/api/files/${encodeURIComponent(name)}/reveal`, { method: 'POST' });
+      showToast(`已在本地定位文件：${name}`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(btn, false);
+    }
     return;
   }
 
