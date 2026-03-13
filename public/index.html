@@ -22,6 +22,7 @@
         <div class="module-tabs" id="module-tabs">
           <button type="button" data-module="adjustment-module">调剂智能导航</button>
           <button type="button" data-module="adjustment-clean-module">调剂数据清洗</button>
+          <button type="button" data-module="adjustment-major-test-module">专业调剂测试</button>
           <button type="button" data-module="news-query-module" data-focus="general">新公告查询</button>
           <button type="button" data-module="news-query-module" data-focus="retest">复试内容检索</button>
           <button type="button" data-module="daily-module">每日任务</button>
@@ -328,6 +329,60 @@
               <ul id="adjustment-clean-quick-list"></ul>
             </div>
           </aside>
+        </div>
+      </section>
+
+      <section class="card module-panel hidden" id="adjustment-major-test-module">
+        <h2>专业调剂测试</h2>
+        <p class="subtitle">基于研招网本地院校库+专业库进行专业匹配，再自动匹配高校官网研招入口并抓取正文做二次专业/调剂过滤。</p>
+
+        <form id="adjustment-major-test-form" class="form-grid">
+          <label>
+            专业关键词
+            <input id="adjustment-major-test-major" required placeholder="例如：学科教学（英语）" />
+          </label>
+          <label>
+            年份（可选）
+            <input id="adjustment-major-test-year" placeholder="例如：2026" />
+          </label>
+          <label>
+            附加关键词（可选，逗号分隔）
+            <input id="adjustment-major-test-keywords" placeholder="例如：调剂, 缺额, 名额, 复试" />
+          </label>
+          <label>
+            匹配院校数
+            <input id="adjustment-major-test-max-schools" type="number" min="1" max="20" value="8" />
+          </label>
+          <label>
+            每校正文抓取上限
+            <input id="adjustment-major-test-max-notices" type="number" min="4" max="36" value="14" />
+          </label>
+          <label>
+            专业候选上限
+            <input id="adjustment-major-test-max-majors" type="number" min="2" max="14" value="8" />
+          </label>
+          <label class="check-row">
+            <input id="adjustment-major-test-refresh-before-run" type="checkbox" />
+            查询前强制刷新本地库
+          </label>
+          <div class="actions inline-actions">
+            <button type="button" id="adjustment-major-test-refresh-btn" class="muted">刷新研招网本地库</button>
+            <button type="submit" id="adjustment-major-test-run-btn">执行专业测试</button>
+            <button type="button" id="adjustment-major-test-export-btn" class="muted">导出选中为 Markdown</button>
+          </div>
+        </form>
+
+        <p class="subtitle quick-editor-tip" id="adjustment-major-test-status">本地库状态：读取中...</p>
+
+        <div id="adjustment-major-test-result" class="verify-panel hidden">
+          <p id="adjustment-major-test-summary" class="subtitle"></p>
+          <p id="adjustment-major-test-major-hits" class="subtitle"></p>
+          <div class="actions inline-actions">
+            <button type="button" id="adjustment-major-test-select-all" class="muted">全选</button>
+            <button type="button" id="adjustment-major-test-invert" class="muted">反选</button>
+          </div>
+          <ul id="adjustment-major-test-list" class="scan-list"></ul>
+          <div id="adjustment-major-test-pager" class="pager"></div>
         </div>
       </section>
 

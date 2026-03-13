@@ -3,3 +3,5 @@ node_modules/
 outputs/*.md
 data/config.json
 data/users.json
+data/yanzhao_catalog.json
+data/*.tmp

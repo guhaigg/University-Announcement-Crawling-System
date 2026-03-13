@@ -20,6 +20,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const OUTPUT_DIR = path.join(ROOT, 'outputs');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const YANZHAO_CATALOG_FILE = path.join(DATA_DIR, 'yanzhao_catalog.json');
 const SESSION_COOKIE_NAME = 'crawler_sid';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ADMIN_USER = String(process.env.DEFAULT_ADMIN_USER || 'admin').trim() || 'admin';
@@ -71,6 +72,41 @@ const ADJUSTMENT_SOURCE_LABELS = {
   yanzhao: '研招网',
   muchong: '小木虫'
 };
+const YANZHAO_BASE_URL = 'https://yz.chsi.com.cn';
+const YANZHAO_CATALOG_MAX_AGE_MS = 72 * 60 * 60 * 1000;
+const YANZHAO_PROVINCE_LIST = [
+  { code: '11', name: '北京', zone: '一区' },
+  { code: '12', name: '天津', zone: '一区' },
+  { code: '13', name: '河北', zone: '一区' },
+  { code: '14', name: '山西', zone: '一区' },
+  { code: '21', name: '辽宁', zone: '一区' },
+  { code: '22', name: '吉林', zone: '一区' },
+  { code: '23', name: '黑龙江', zone: '一区' },
+  { code: '31', name: '上海', zone: '一区' },
+  { code: '32', name: '江苏', zone: '一区' },
+  { code: '33', name: '浙江', zone: '一区' },
+  { code: '34', name: '安徽', zone: '一区' },
+  { code: '35', name: '福建', zone: '一区' },
+  { code: '36', name: '江西', zone: '一区' },
+  { code: '37', name: '山东', zone: '一区' },
+  { code: '41', name: '河南', zone: '一区' },
+  { code: '42', name: '湖北', zone: '一区' },
+  { code: '43', name: '湖南', zone: '一区' },
+  { code: '44', name: '广东', zone: '一区' },
+  { code: '50', name: '重庆', zone: '一区' },
+  { code: '51', name: '四川', zone: '一区' },
+  { code: '61', name: '陕西', zone: '一区' },
+  { code: '15', name: '内蒙古', zone: '二区' },
+  { code: '45', name: '广西', zone: '二区' },
+  { code: '46', name: '海南', zone: '二区' },
+  { code: '52', name: '贵州', zone: '二区' },
+  { code: '53', name: '云南', zone: '二区' },
+  { code: '54', name: '西藏', zone: '二区' },
+  { code: '62', name: '甘肃', zone: '二区' },
+  { code: '63', name: '青海', zone: '二区' },
+  { code: '64', name: '宁夏', zone: '二区' },
+  { code: '65', name: '新疆', zone: '二区' }
+];
 
 const scheduledJobs = new Map();
 const runningTasks = new Set();
@@ -3042,6 +3078,849 @@ async function fetchHtml(url) {
   };
 }
 
+async function safeHttpPostForm(url, formData = {}, config = {}, maxRedirects = 3, sourceLabel = '抓取任务') {
+  let currentUrl = String(url || '').trim();
+  const buildBody = (raw) => {
+    const body = new URLSearchParams();
+    Object.entries(raw || {}).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((item) => body.append(key, String(item ?? '').trim()));
+        return;
+      }
+      body.append(key, value === undefined || value === null ? '' : String(value));
+    });
+    return body.toString();
+  };
+  const payload = buildBody(formData);
+  for (let step = 0; step <= maxRedirects; step += 1) {
+    const safeUrl = await assertSafeRemoteUrl(currentUrl, sourceLabel);
+    const response = await axios.post(safeUrl, payload, {
+      ...config,
+      lookup: secureDnsLookup,
+      maxRedirects: 0
+    });
+    const status = Number(response.status || 0);
+    const location = String(response.headers?.location || '').trim();
+    if (status >= 300 && status < 400 && location) {
+      currentUrl = normalizeUrl(safeUrl, location);
+      if (!currentUrl) {
+        throw new Error(`${sourceLabel}重定向链接非法`);
+      }
+      continue;
+    }
+    return { response, finalUrl: safeUrl };
+  }
+  throw new Error(`${sourceLabel}重定向次数超过限制`);
+}
+
+function normalizeYanzhaoSchoolRecord(recordLike, fallbackProvince = null) {
+  const record = recordLike || {};
+  const ssdm = String(record.szssm || record.ssdm || fallbackProvince?.code || '').trim();
+  const province = YANZHAO_PROVINCE_LIST.find((item) => item.code === ssdm);
+  return {
+    schId: String(record.schId || '').trim(),
+    dwdm: String(record.dwdm || '').trim(),
+    dwmc: normalizeText(record.dwmc || ''),
+    ssdm,
+    ssmc: normalizeText(record.szss || record.ssmc || province?.name || fallbackProvince?.name || ''),
+    zone: String(fallbackProvince?.zone || province?.zone || '').trim(),
+    zhx: String(record.zhx || '0') === '1',
+    bs: String(record.bs || '0') === '1',
+    syl: String(record.syl || '0') === '1',
+    sign: String(record.sign || '').trim(),
+    sign2: String(record.sign2 || '').trim()
+  };
+}
+
+function normalizeYanzhaoMajorRecord(recordLike, fallback = {}) {
+  const record = recordLike || {};
+  return {
+    zydm: String(record.zydm || fallback.zydm || '').trim(),
+    zymc: normalizeText(record.zymc || fallback.zymc || ''),
+    xwlx: String(record.xwlx || fallback.xwlx || '').trim(),
+    xwlxmc: normalizeText(record.xwlxmc || fallback.xwlxmc || ''),
+    mldm: String(record.mldm || fallback.mldm || '').trim(),
+    mlmc: normalizeText(record.mlmc || fallback.mlmc || ''),
+    yjxkdm: String(record.yjxkdm || fallback.yjxkdm || '').trim(),
+    yjxkmc: normalizeText(record.yjxkmc || fallback.yjxkmc || ''),
+    sign: String(record.sign || fallback.sign || '').trim(),
+    sign2: String(record.sign2 || fallback.sign2 || '').trim()
+  };
+}
+
+function normalizeYanzhaoCatalog(catalogLike) {
+  const catalog = catalogLike || {};
+  const schools = Array.isArray(catalog.schools) ? catalog.schools.map((item) => normalizeYanzhaoSchoolRecord(item)).filter((item) => item.dwmc) : [];
+  const majors = Array.isArray(catalog.majors) ? catalog.majors.map((item) => normalizeYanzhaoMajorRecord(item)).filter((item) => item.zydm && item.zymc) : [];
+  return {
+    version: Number(catalog.version || 1),
+    source: String(catalog.source || YANZHAO_BASE_URL),
+    refreshedAt: String(catalog.refreshedAt || ''),
+    generatedAt: String(catalog.generatedAt || catalog.refreshedAt || ''),
+    schools,
+    majors
+  };
+}
+
+async function readYanzhaoCatalog() {
+  try {
+    const raw = await fsp.readFile(YANZHAO_CATALOG_FILE, 'utf8');
+    return normalizeYanzhaoCatalog(JSON.parse(raw));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function writeYanzhaoCatalog(catalog) {
+  const normalized = normalizeYanzhaoCatalog(catalog);
+  const tmpFile = `${YANZHAO_CATALOG_FILE}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(tmpFile, JSON.stringify(normalized, null, 2), 'utf8');
+  await fsp.rename(tmpFile, YANZHAO_CATALOG_FILE);
+  return normalized;
+}
+
+function buildYanzhaoCatalogStatus(catalogLike) {
+  const catalog = normalizeYanzhaoCatalog(catalogLike || {});
+  const refreshedAt = String(catalog.refreshedAt || '');
+  const refreshedTs = refreshedAt ? new Date(refreshedAt).getTime() : 0;
+  const ageMs = Number.isFinite(refreshedTs) && refreshedTs > 0 ? Math.max(0, Date.now() - refreshedTs) : null;
+  return {
+    exists: Boolean(catalog.schools.length || catalog.majors.length),
+    refreshedAt: refreshedAt || '',
+    ageHours: ageMs === null ? null : Number((ageMs / 3600000).toFixed(2)),
+    schoolCount: catalog.schools.length,
+    majorCount: catalog.majors.length
+  };
+}
+
+async function getYanzhaoJson(endpoint, sourceLabel = '研招网接口') {
+  const url = `${YANZHAO_BASE_URL}${endpoint}`;
+  const { response } = await safeHttpGet(
+    url,
+    {
+      responseType: 'json',
+      timeout: 35000,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json,text/plain,*/*',
+        Referer: `${YANZHAO_BASE_URL}/zsml/`,
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      },
+      validateStatus: (status) => status >= 200 && status < 400
+    },
+    3
+  );
+  const payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+  if (!payload || typeof payload !== 'object') {
+    throw new Error(`${sourceLabel}返回格式异常`);
+  }
+  return payload;
+}
+
+async function postYanzhaoForm(endpoint, formData, sourceLabel = '研招网接口') {
+  const url = `${YANZHAO_BASE_URL}${endpoint}`;
+  const { response } = await safeHttpPostForm(
+    url,
+    formData,
+    {
+      responseType: 'json',
+      timeout: 40000,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json,text/plain,*/*',
+        Referer: `${YANZHAO_BASE_URL}/zsml/`,
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      validateStatus: (status) => status >= 200 && status < 400
+    },
+    3,
+    sourceLabel
+  );
+  const payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+  if (!payload || typeof payload !== 'object') {
+    throw new Error(`${sourceLabel}返回格式异常`);
+  }
+  if (payload.flag === false) {
+    throw new Error(normalizeText(payload.msg || `${sourceLabel}请求失败`));
+  }
+  return payload;
+}
+
+async function fetchYanzhaoSchoolCatalog(options = {}) {
+  const maxPagesPerProvince = Math.max(1, Math.min(45, Number(options.maxPagesPerProvince) || 25));
+  const schoolMap = new Map();
+
+  for (const province of YANZHAO_PROVINCE_LIST) {
+    let curPage = 1;
+    let totalPage = 1;
+    let pageSize = 10;
+    while (curPage <= totalPage && curPage <= maxPagesPerProvince) {
+      const start = (curPage - 1) * pageSize;
+      let resp;
+      try {
+        resp = await postYanzhaoForm(
+          '/zsml/rs/dws.do',
+          {
+            dwdm: '',
+            dwmc: '',
+            ssdm: province.code,
+            xxfs: '',
+            dwlxs: ['all'],
+            tydxs: '',
+            jsggjh: '',
+            start,
+            curPage,
+            pageSize
+          },
+          `研招网院校库(${province.name})`
+        );
+      } catch (error) {
+        if (curPage > 1) break;
+        throw error;
+      }
+      const msg = resp.msg || {};
+      const list = Array.isArray(msg.list) ? msg.list : [];
+      totalPage = Math.max(1, Number(msg.totalPage) || totalPage);
+      pageSize = Math.max(1, Number(msg.pageCount) || pageSize);
+      for (const raw of list) {
+        const school = normalizeYanzhaoSchoolRecord(raw, province);
+        if (!school.dwmc) continue;
+        const key = school.dwdm || normalizeMatchText(school.dwmc);
+        if (!key) continue;
+        const old = schoolMap.get(key);
+        if (!old) {
+          schoolMap.set(key, school);
+          continue;
+        }
+        if ((!old.schId && school.schId) || (!old.sign && school.sign)) {
+          schoolMap.set(key, { ...old, ...school });
+        }
+      }
+      if (!list.length) break;
+      curPage += 1;
+    }
+  }
+  return Array.from(schoolMap.values()).sort((a, b) => {
+    if (a.ssdm !== b.ssdm) return a.ssdm.localeCompare(b.ssdm);
+    return (a.dwdm || a.dwmc).localeCompare(b.dwdm || b.dwmc);
+  });
+}
+
+async function fetchYanzhaoMajorCatalog(options = {}) {
+  const maxPagesPerCategory = Math.max(1, Math.min(16, Number(options.maxPagesPerCategory) || 8));
+  const majorMap = new Map();
+  const mlData = await getYanzhaoJson('/zsml/code/ml.json', '研招网学术学位门类');
+  const academicMlList = Array.isArray(mlData.dms) ? mlData.dms : [];
+  const proData = await getYanzhaoJson('/zsml/code/zyly.json', '研招网专业学位领域');
+  const professionalList = Array.isArray(proData.dms) ? proData.dms : [];
+
+  const categories = [];
+  for (const ml of academicMlList) {
+    const mldm = String(ml?.dm || '').trim();
+    if (!mldm) continue;
+    let xkData = { dms: [] };
+    try {
+      xkData = await getYanzhaoJson(`/zsml/code/yjxk/${encodeURIComponent(mldm)}.json`, `研招网学科目录(${mldm})`);
+    } catch (error) {
+      xkData = { dms: [] };
+    }
+    const xkList = Array.isArray(xkData.dms) ? xkData.dms : [];
+    if (!xkList.length) {
+      categories.push({
+        xwlx: 'xs',
+        xwlxmc: '学术学位',
+        mldm,
+        mlmc: normalizeText(ml.mc || ''),
+        yjxkdm: '',
+        yjxkmc: ''
+      });
+      continue;
+    }
+    xkList.forEach((xk) => {
+      categories.push({
+        xwlx: 'xs',
+        xwlxmc: '学术学位',
+        mldm,
+        mlmc: normalizeText(ml.mc || ''),
+        yjxkdm: String(xk?.dm || '').trim(),
+        yjxkmc: normalizeText(xk?.mc || '')
+      });
+    });
+  }
+
+  professionalList.forEach((item) => {
+    const yjxkdm = String(item?.dm || '').trim();
+    if (!yjxkdm) return;
+    categories.push({
+      xwlx: 'zyxw',
+      xwlxmc: '专业学位',
+      mldm: '',
+      mlmc: '',
+      yjxkdm,
+      yjxkmc: normalizeText(item?.mc || '')
+    });
+  });
+
+  for (const category of categories) {
+    let curPage = 1;
+    let totalPage = 1;
+    let pageSize = 10;
+    while (curPage <= totalPage && curPage <= maxPagesPerCategory) {
+      const start = (curPage - 1) * pageSize;
+      let resp;
+      try {
+        resp = await postYanzhaoForm(
+          '/zsml/rs/zys.do',
+          {
+            zydm: '',
+            zymc: '',
+            xwlx: category.xwlx,
+            mldm: category.mldm,
+            yjxkdm: category.yjxkdm,
+            xxfs: '',
+            tydxs: '',
+            jsggjh: '',
+            start,
+            curPage,
+            pageSize
+          },
+          `研招网专业库(${category.yjxkmc || category.mlmc || category.xwlx})`
+        );
+      } catch (error) {
+        if (curPage > 1) break;
+        throw error;
+      }
+      const msg = resp.msg || {};
+      const list = Array.isArray(msg.list) ? msg.list : [];
+      totalPage = Math.max(1, Number(msg.totalPage) || totalPage);
+      pageSize = Math.max(1, Number(msg.pageCount) || pageSize);
+      list.forEach((raw) => {
+        const major = normalizeYanzhaoMajorRecord(raw, category);
+        if (!major.zydm || !major.zymc) return;
+        const key = [major.zydm, major.xwlx, major.mldm, major.yjxkdm].join('::');
+        const old = majorMap.get(key);
+        if (!old || (!old.sign && major.sign)) {
+          majorMap.set(key, major);
+        }
+      });
+      if (!list.length) break;
+      curPage += 1;
+    }
+  }
+
+  return Array.from(majorMap.values()).sort((a, b) => {
+    if (a.zydm !== b.zydm) return a.zydm.localeCompare(b.zydm);
+    return a.zymc.localeCompare(b.zymc);
+  });
+}
+
+async function refreshYanzhaoCatalog(options = {}) {
+  const [schools, majors] = await Promise.all([fetchYanzhaoSchoolCatalog(options), fetchYanzhaoMajorCatalog(options)]);
+  const now = nowIsoSafe();
+  const catalog = {
+    version: 1,
+    source: YANZHAO_BASE_URL,
+    refreshedAt: now,
+    generatedAt: now,
+    schools,
+    majors
+  };
+  return writeYanzhaoCatalog(catalog);
+}
+
+async function getOrRefreshYanzhaoCatalog(options = {}) {
+  const forceRefresh = normalizeBooleanFlag(options.forceRefresh, false);
+  const maxAgeMs = Math.max(1, Number(options.maxAgeMs) || YANZHAO_CATALOG_MAX_AGE_MS);
+  let catalog = await readYanzhaoCatalog();
+  const status = buildYanzhaoCatalogStatus(catalog || {});
+  const isExpired = status.ageHours !== null && status.ageHours * 3600000 > maxAgeMs;
+  if (!catalog || !status.exists || forceRefresh || isExpired) {
+    catalog = await refreshYanzhaoCatalog(options);
+  }
+  return normalizeYanzhaoCatalog(catalog);
+}
+
+function scoreYanzhaoMajorCandidate(major, majorKeyword) {
+  const keyword = String(majorKeyword || '').trim();
+  if (!keyword) return 0;
+  const name = normalizeMajorForCompare(major?.zymc || '');
+  const code = String(major?.zydm || '').trim();
+  const keywordNorm = normalizeMajorForCompare(keyword);
+  let score = 0;
+  if (name && keywordNorm) {
+    if (name === keywordNorm) score += 180;
+    if (name.includes(keywordNorm)) score += 120;
+    if (keywordNorm.includes(name) && name.length >= 2) score += 70;
+  }
+  if (isMajorKeywordMatch(major?.zymc || '', keyword)) score += 80;
+  if (keyword && code && keyword.replace(/\D/g, '') && code.includes(keyword.replace(/\D/g, ''))) score += 50;
+  const majorTokens = parseKeywords(keyword.replace(/[\/\s]+/g, ','));
+  majorTokens.forEach((token) => {
+    const tokenNorm = normalizeMajorForCompare(token);
+    if (tokenNorm && name.includes(tokenNorm)) score += 16;
+  });
+  return score;
+}
+
+async function fetchYanzhaoAutoMajorHints(majorKeyword) {
+  const keyword = String(majorKeyword || '').trim();
+  if (!keyword || keyword.length < 2) return [];
+  const endpoint = `/zsml/code/autozy.do?q=${encodeURIComponent(keyword)}`;
+  try {
+    const payload = await getYanzhaoJson(endpoint, '研招网专业联想');
+    if (!Array.isArray(payload)) return [];
+    return payload
+      .map((item) => ({
+        zydm: String(item?.dm || '').trim(),
+        zymc: normalizeText(item?.mc || '')
+      }))
+      .filter((item) => item.zydm && item.zymc)
+      .slice(0, 20);
+  } catch (error) {
+    return [];
+  }
+}
+
+function pickMatchedMajorCandidates(catalog, majorKeyword, maxCandidates = 10) {
+  const hintSet = new Set();
+  const majorList = Array.isArray(catalog?.majors) ? catalog.majors : [];
+  const scored = majorList
+    .map((major) => ({
+      ...major,
+      matchScore: scoreYanzhaoMajorCandidate(major, majorKeyword)
+    }))
+    .filter((item) => item.matchScore > 0);
+  const sorted = scored.sort((a, b) => b.matchScore - a.matchScore || a.zydm.localeCompare(b.zydm));
+  const picked = [];
+  const seen = new Set();
+  for (const item of sorted) {
+    const key = [item.zydm, item.xwlx, item.mldm, item.yjxkdm].join('::');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hintSet.add(item.zydm);
+    picked.push(item);
+    if (picked.length >= maxCandidates) break;
+  }
+  return { picked, hintSet };
+}
+
+async function queryYanzhaoSchoolsByMajor(major, options = {}) {
+  const maxPages = Math.max(1, Math.min(20, Number(options.maxPages) || 8));
+  const maxSchools = Math.max(1, Math.min(1200, Number(options.maxSchools) || 500));
+  if (!major?.zydm || !major?.zymc || !major?.sign) {
+    return [];
+  }
+  const output = [];
+  const seen = new Set();
+  let curPage = 1;
+  let totalPage = 1;
+  let pageSize = 10;
+  while (curPage <= totalPage && curPage <= maxPages && output.length < maxSchools) {
+    const start = (curPage - 1) * pageSize;
+    let resp;
+    try {
+      resp = await postYanzhaoForm(
+        '/zsml/rs/zydws.do',
+        {
+          zydm: major.zydm,
+          zymc: major.zymc,
+          dwmc: '',
+          dwdm: '',
+          ssdm: '',
+          xxfs: '',
+          dwlxs: ['all'],
+          tydxs: '',
+          jsggjh: '',
+          sign: major.sign,
+          start,
+          curPage,
+          pageSize
+        },
+        `研招网专业院校匹配(${major.zymc})`
+      );
+    } catch (error) {
+      if (output.length) break;
+      throw error;
+    }
+    const msg = resp.msg || {};
+    const list = Array.isArray(msg.list) ? msg.list : [];
+    totalPage = Math.max(1, Number(msg.totalPage) || totalPage);
+    pageSize = Math.max(1, Number(msg.pageCount) || pageSize);
+    for (const raw of list) {
+      const school = normalizeYanzhaoSchoolRecord(raw);
+      if (!school.dwmc) continue;
+      const key = school.dwdm || normalizeMatchText(school.dwmc);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      output.push(school);
+      if (output.length >= maxSchools) break;
+    }
+    if (!list.length) break;
+    curPage += 1;
+  }
+  return output;
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const list = Array.isArray(items) ? items : [];
+  const limit = Math.max(1, Number(concurrency) || 1);
+  const results = new Array(list.length);
+  let cursor = 0;
+  async function runOne() {
+    while (true) {
+      const idx = cursor;
+      cursor += 1;
+      if (idx >= list.length) return;
+      results[idx] = await worker(list[idx], idx);
+    }
+  }
+  const jobs = [];
+  for (let i = 0; i < Math.min(limit, list.length); i += 1) {
+    jobs.push(runOne());
+  }
+  await Promise.all(jobs);
+  return results;
+}
+
+async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
+  const schoolName = String(schoolCandidate?.schoolName || schoolCandidate?.dwmc || '').trim();
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const keywordMatchers = Array.isArray(options.keywordMatchers) ? options.keywordMatchers : [];
+  const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
+  if (!schoolName) {
+    return {
+      schoolName: '',
+      dwdm: '',
+      ssmc: '',
+      majorMatches: [],
+      notices: [],
+      summary: { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0 },
+      error: '院校名称为空'
+    };
+  }
+  try {
+    const queryResult = await queryGraduateRecentNoticesBySchoolName({
+      schoolName,
+      collegeName: '',
+      includeCollegePages: true,
+      focus: 'general'
+    });
+    const seeds = Array.isArray(queryResult.items) ? queryResult.items.slice(0, maxNoticesPerSchool) : [];
+    const noticeMap = new Map();
+    for (const seed of seeds) {
+      try {
+        const detail = await fetchNoticeDetail({
+          title: seed.title,
+          url: seed.url,
+          dateHint: seed.dateHint || ''
+        });
+        const cleanedContent = cleanExtractedContent(`${detail.title || seed.title || ''}\n${detail.content || ''}`, {
+          level: 'standard',
+          paragraphDedup: false
+        });
+        const attachmentText = Array.isArray(detail.attachments) ? detail.attachments.map((item) => item.name).join(' ') : '';
+        const mergedText = `${detail.title || seed.title || ''}\n${cleanedContent}\n${attachmentText}`;
+        const majorHit = isMajorKeywordMatch(mergedText, majorKeyword);
+        if (!majorHit) continue;
+        const keywordMatch = scoreKeywordMatches(mergedText, keywordMatchers);
+        const adjustmentHits = countHintHits(mergedText, ADJUSTMENT_HINTS) + (/(调剂|名额|缺额|接受调剂)/.test(mergedText) ? 1 : 0);
+        const quota = extractAdjustmentQuota(mergedText);
+        const publishedDateObj =
+          (seed.publishedDate ? buildLocalDateSafe(seed.publishedDate.slice(0, 4), seed.publishedDate.slice(5, 7), seed.publishedDate.slice(8, 10)) : null) ||
+          extractPublishedDate({
+            title: detail.title || seed.title || '',
+            url: detail.url || seed.url,
+            dateHint: detail.dateHint || seed.dateHint || ''
+          });
+        const publishedDate = publishedDateObj ? formatLocalDateKey(publishedDateObj) : String(seed.publishedDate || '').trim();
+        if (targetYear) {
+          const yearText = `${publishedDate || ''} ${detail.title || ''} ${detail.url || ''} ${cleanedContent || ''}`;
+          if (!yearText.includes(targetYear)) continue;
+        }
+        if (adjustmentHits <= 0 && quota.numbers.length <= 0 && keywordMatch.keywordMatchScore <= 0) continue;
+        const item = {
+          id: `${normalizeUrlForKey(detail.url || seed.url)}::${normalizeMatchText(detail.title || seed.title || '')}::${normalizeMatchText(schoolName)}`,
+          schoolName,
+          dwdm: String(schoolCandidate?.dwdm || '').trim(),
+          ssmc: String(schoolCandidate?.ssmc || '').trim(),
+          title: detail.title || seed.title || seed.url,
+          url: detail.url || seed.url,
+          publishedDate,
+          dayBucket: seed.dayBucket || 'other',
+          dayLabel: seed.dayLabel || '',
+          sourcePage: seed.sourcePage || '',
+          matchedKeywords: keywordMatch.matchedKeywords || [],
+          keywordScore: keywordMatch.keywordMatchScore || 0,
+          adjustmentHits,
+          quotaNumbers: quota.numbers,
+          quotaSnippets: quota.snippets,
+          attachments: Array.isArray(detail.attachments) ? detail.attachments : [],
+          excerpt: cleanedContent ? `${cleanedContent.slice(0, 300)}${cleanedContent.length > 300 ? '...' : ''}` : '',
+          relevanceScore: adjustmentHits * 22 + (quota.numbers.length ? 30 : 0) + (keywordMatch.keywordMatchScore || 0) * 8 + (publishedDate ? 10 : 0)
+        };
+        const old = noticeMap.get(item.id);
+        if (!old || (old.relevanceScore || 0) < item.relevanceScore) {
+          noticeMap.set(item.id, item);
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    const notices = Array.from(noticeMap.values())
+      .sort((a, b) => {
+        if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+          return b.publishedDate.localeCompare(a.publishedDate);
+        }
+        return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+      })
+      .slice(0, 24);
+    return {
+      schoolName,
+      dwdm: String(schoolCandidate?.dwdm || '').trim(),
+      ssmc: String(schoolCandidate?.ssmc || '').trim(),
+      majorMatches: Array.isArray(schoolCandidate?.majorMatches) ? schoolCandidate.majorMatches : [],
+      profile: queryResult.profile || {},
+      pages: Array.isArray(queryResult.pages) ? queryResult.pages : [],
+      notices,
+      summary: {
+        scanned: seeds.length,
+        matched: notices.length,
+        withQuota: notices.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
+        withAttachment: notices.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length
+      },
+      error: ''
+    };
+  } catch (error) {
+    return {
+      schoolName,
+      dwdm: String(schoolCandidate?.dwdm || '').trim(),
+      ssmc: String(schoolCandidate?.ssmc || '').trim(),
+      majorMatches: Array.isArray(schoolCandidate?.majorMatches) ? schoolCandidate.majorMatches : [],
+      notices: [],
+      summary: { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0 },
+      error: error.message || '匹配失败'
+    };
+  }
+}
+
+async function runAdjustmentMajorTest(options = {}) {
+  const majorKeyword = String(options.majorKeyword || '').trim();
+  if (!majorKeyword) {
+    throw new Error('请输入专业关键词');
+  }
+  const targetYear = extractAdjustmentYearText(options.targetYear || '');
+  const keywords = parseKeywords(options.keywords || '');
+  const forceRefresh = normalizeBooleanFlag(options.refreshCatalog, false);
+  const maxSchools = Math.max(1, Math.min(20, Number(options.maxSchools) || 8));
+  const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
+  const maxMajorCandidates = Math.max(2, Math.min(14, Number(options.maxMajorCandidates) || 8));
+  const catalog = await getOrRefreshYanzhaoCatalog({ forceRefresh });
+  const autoMajorHints = await fetchYanzhaoAutoMajorHints(majorKeyword);
+  const { picked, hintSet } = pickMatchedMajorCandidates(catalog, majorKeyword, Math.max(maxMajorCandidates * 2, 16));
+  if (!picked.length) {
+    throw new Error('本地专业库未匹配到相关专业，请先刷新研招网本地库后重试');
+  }
+  autoMajorHints.forEach((item) => hintSet.add(item.zydm));
+  picked.forEach((item) => {
+    if (hintSet.has(item.zydm)) {
+      item.matchScore += 36;
+    }
+  });
+  const majorCandidates = picked
+    .sort((a, b) => b.matchScore - a.matchScore || a.zydm.localeCompare(b.zydm))
+    .slice(0, maxMajorCandidates);
+
+  const schoolMap = new Map();
+  const majorSchoolErrors = [];
+  for (const major of majorCandidates) {
+    let schools = [];
+    try {
+      schools = await queryYanzhaoSchoolsByMajor(major, { maxPages: 10, maxSchools: 900 });
+    } catch (error) {
+      majorSchoolErrors.push(`${major.zymc || major.zydm}: ${error.message || '请求失败'}`);
+      schools = [];
+    }
+    major.candidateSchoolCount = schools.length;
+    for (const school of schools) {
+      const key = school.dwdm || normalizeMatchText(school.dwmc);
+      if (!key || !school.dwmc) continue;
+      const old = schoolMap.get(key) || {
+        schoolName: school.dwmc,
+        dwdm: school.dwdm,
+        ssmc: school.ssmc,
+        ssdm: school.ssdm,
+        majorMatches: [],
+        score: 0
+      };
+      old.score += major.matchScore;
+      old.majorMatches.push({
+        zydm: major.zydm,
+        zymc: major.zymc,
+        xwlx: major.xwlx,
+        xwlxmc: major.xwlxmc || (major.xwlx === 'zyxw' ? '专业学位' : '学术学位'),
+        matchScore: major.matchScore
+      });
+      schoolMap.set(key, old);
+    }
+  }
+
+  const schoolCandidates = Array.from(schoolMap.values())
+    .map((item) => ({
+      ...item,
+      majorMatches: item.majorMatches
+        .sort((a, b) => b.matchScore - a.matchScore)
+        .filter((value, index, arr) => arr.findIndex((x) => x.zydm === value.zydm) === index)
+        .slice(0, 5)
+    }))
+    .sort((a, b) => b.score - a.score || a.schoolName.localeCompare(b.schoolName))
+    .slice(0, Math.max(maxSchools, 1));
+
+  if (!schoolCandidates.length) {
+    if (majorSchoolErrors.length) {
+      throw new Error(`专业院校匹配失败：${majorSchoolErrors.slice(0, 2).join('；')}`);
+    }
+    throw new Error('未找到开设该专业的院校，建议换一个专业关键词重试');
+  }
+
+  const keywordMatchers = buildKeywordMatchers(
+    Array.from(new Set([...buildMajorKeywordVariants(majorKeyword), ...keywords, '调剂', '名额', '缺额', '复试', '研究生招生']))
+  );
+  const schoolResults = await mapWithConcurrency(schoolCandidates.slice(0, maxSchools), 2, async (school) =>
+    runAdjustmentMajorTestForSchool(school, {
+      majorKeyword,
+      targetYear,
+      keywordMatchers,
+      maxNoticesPerSchool
+    })
+  );
+  const schools = schoolResults.map((item) => ({
+    ...item,
+    majorMatches: Array.isArray(item.majorMatches) ? item.majorMatches : []
+  }));
+  const items = schools.flatMap((school) =>
+    (Array.isArray(school.notices) ? school.notices : []).map((notice) => ({
+      ...notice,
+      schoolName: school.schoolName,
+      dwdm: school.dwdm,
+      ssmc: school.ssmc,
+      majorMatches: school.majorMatches
+    }))
+  );
+
+  const summary = {
+    schoolsFromCatalog: schoolCandidates.length,
+    schoolsScanned: schools.length,
+    schoolsWithResult: schools.filter((school) => Array.isArray(school.notices) && school.notices.length > 0).length,
+    failedSchools: schools.filter((school) => school.error).length,
+    totalNotices: items.length,
+    withQuota: items.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
+    withAttachment: items.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length
+  };
+
+  return {
+    checkedAt: nowIsoSafe(),
+    query: {
+      majorKeyword,
+      targetYear,
+      keywords,
+      maxSchools,
+      maxNoticesPerSchool,
+      forceRefresh
+    },
+    catalog: buildYanzhaoCatalogStatus(catalog),
+    majorCandidates,
+    schools,
+    summary,
+    items: items.sort((a, b) => {
+      if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+        return b.publishedDate.localeCompare(a.publishedDate);
+      }
+      return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+    })
+  };
+}
+
+function buildAdjustmentMajorTestMarkdown(result, selectedItems = []) {
+  const payload = result || {};
+  const query = payload.query || {};
+  const summary = payload.summary || {};
+  const catalog = payload.catalog || {};
+  const allItems = Array.isArray(selectedItems) && selectedItems.length ? selectedItems : Array.isArray(payload.items) ? payload.items : [];
+  const lines = [];
+  lines.push(`# 专业调剂测试报告 - ${query.majorKeyword || '未命名专业'}`);
+  lines.push('');
+  lines.push(`- 生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`);
+  lines.push(`- 专业关键词: ${query.majorKeyword || '-'}`);
+  lines.push(`- 年份筛选: ${query.targetYear || '-'}`);
+  lines.push(`- 关键词: ${Array.isArray(query.keywords) && query.keywords.length ? query.keywords.join(' / ') : '-'}`);
+  lines.push(`- 本地库更新时间: ${catalog.refreshedAt || '-'}`);
+  lines.push(`- 本地库规模: 院校 ${catalog.schoolCount || 0} 所 / 专业 ${catalog.majorCount || 0} 条`);
+  lines.push(`- 匹配院校: ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所`);
+  lines.push(`- 公告命中: ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条）`);
+  lines.push('');
+  if (!allItems.length) {
+    lines.push('未检索到符合条件的调剂公告。');
+    return lines.join('\n');
+  }
+  allItems.forEach((item, index) => {
+    lines.push(`## ${index + 1}. ${item.title || '(无标题)'}`);
+    lines.push('');
+    lines.push(`- 院校: ${item.schoolName || '-'}`);
+    if (item.dwdm) lines.push(`- 院校代码: ${item.dwdm}`);
+    if (item.ssmc) lines.push(`- 所在地: ${item.ssmc}`);
+    lines.push(`- 链接: ${item.url || '-'}`);
+    if (item.publishedDate) lines.push(`- 日期: ${item.publishedDate}`);
+    if (Array.isArray(item.quotaNumbers) && item.quotaNumbers.length) {
+      lines.push(`- 调剂名额提取: ${item.quotaNumbers.join(' / ')}`);
+    } else {
+      lines.push('- 调剂名额提取: 未识别');
+    }
+    if (Array.isArray(item.matchedKeywords) && item.matchedKeywords.length) {
+      lines.push(`- 关键词命中: ${item.matchedKeywords.join(' / ')}`);
+    }
+    const majorMatchLabel = Array.isArray(item.majorMatches)
+      ? item.majorMatches
+          .map((entry) => `${entry.zymc || ''}${entry.zydm ? `(${entry.zydm})` : ''}`)
+          .filter(Boolean)
+          .slice(0, 3)
+          .join(' / ')
+      : '';
+    if (majorMatchLabel) {
+      lines.push(`- 专业匹配链路: ${majorMatchLabel}`);
+    }
+    lines.push('');
+    lines.push(item.excerpt || '（未提取到正文摘要）');
+    if (Array.isArray(item.attachments) && item.attachments.length) {
+      lines.push('');
+      lines.push('### 附件链接');
+      lines.push('');
+      item.attachments.forEach((attachment, idx) => {
+        lines.push(`${idx + 1}. [${attachment.name || '附件'}](${attachment.url})`);
+      });
+    }
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+async function writeAdjustmentMajorTestMarkdown(result, selectedItems = []) {
+  const query = result?.query || {};
+  const seed = sanitizeFilename(String(query.majorKeyword || '专业调剂测试'));
+  const fileName = `${seed}_专业调剂测试_${nowFilenameStamp()}.md`;
+  const filePath = path.join(OUTPUT_DIR, fileName);
+  const content = buildAdjustmentMajorTestMarkdown(result, selectedItems);
+  await fsp.writeFile(filePath, content, 'utf8');
+  return {
+    fileName,
+    fileNames: [fileName],
+    fileCount: 1
+  };
+}
+
 function scoreCandidateLink(baseHost, text, href, crawlMode = 'general') {
   const textLower = text.toLowerCase();
   const hrefLower = href.toLowerCase();
@@ -5025,6 +5904,60 @@ app.post('/api/adjustment-clean/export', async (req, res) => {
     res.json({ ok: true, ...output });
   } catch (error) {
     res.status(400).json({ error: error.message || '调剂数据导出失败' });
+  }
+});
+
+app.get('/api/adjustment-major-test/catalog-status', async (_req, res) => {
+  try {
+    const catalog = await readYanzhaoCatalog();
+    const status = buildYanzhaoCatalogStatus(catalog || {});
+    res.json({ ok: true, status });
+  } catch (error) {
+    res.status(500).json({ error: error.message || '读取研招网本地库状态失败' });
+  }
+});
+
+app.post('/api/adjustment-major-test/catalog-refresh', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const catalog = await refreshYanzhaoCatalog({
+      maxPagesPerProvince: body.maxPagesPerProvince,
+      maxPagesPerCategory: body.maxPagesPerCategory
+    });
+    const status = buildYanzhaoCatalogStatus(catalog);
+    res.json({ ok: true, status });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '刷新研招网本地库失败' });
+  }
+});
+
+app.post('/api/adjustment-major-test/query', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const result = await runAdjustmentMajorTest({
+      majorKeyword: body.majorKeyword,
+      targetYear: body.targetYear,
+      keywords: body.keywords,
+      refreshCatalog: body.refreshCatalog,
+      maxSchools: body.maxSchools,
+      maxNoticesPerSchool: body.maxNoticesPerSchool,
+      maxMajorCandidates: body.maxMajorCandidates
+    });
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '专业调剂测试失败' });
+  }
+});
+
+app.post('/api/adjustment-major-test/export', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const result = body.result || {};
+    const selectedItems = Array.isArray(body.selectedItems) ? body.selectedItems : [];
+    const output = await writeAdjustmentMajorTestMarkdown(result, selectedItems);
+    res.json({ ok: true, ...output });
+  } catch (error) {
+    res.status(400).json({ error: error.message || '导出专业调剂测试 Markdown 失败' });
   }
 });
 
