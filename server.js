@@ -3985,6 +3985,55 @@ app.get('/api/manual-presets', async (_, res) => {
   res.json({ presets: decorateManualPresets(config.manualPresets || []) });
 });
 
+app.post('/api/manual-presets/sync-news', async (req, res) => {
+  const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const config = await readConfig();
+  const source = Array.isArray(config.manualPresets) ? config.manualPresets.map(normalizePresetRecord) : [];
+  const selected = ids.length ? source.filter((item) => ids.includes(item.id)) : source;
+  if (!selected.length) {
+    return res.status(400).json({ error: ids.length ? '未找到可同步的院校记录' : '最近十所院校为空，无法同步' });
+  }
+
+  const incoming = selected.map((item) => ({
+    schoolName: item.schoolName,
+    collegeName: item.collegeName || '',
+    includeCollegePages: item.includeCollegePages !== false
+  }));
+  const before = Array.isArray(config.quickNewsSchools) ? config.quickNewsSchools.length : 0;
+  config.quickNewsSchools = mergeQuickSchoolRecords(config.quickNewsSchools || [], incoming, 10);
+  config.quickRetestSchools = config.quickNewsSchools;
+  await writeConfig(config);
+  res.json({
+    ok: true,
+    syncedCount: Math.max(0, config.quickNewsSchools.length - before),
+    schools: config.quickNewsSchools
+  });
+});
+
+app.post('/api/manual-presets/sync-adjustment', async (req, res) => {
+  const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const config = await readConfig();
+  const source = Array.isArray(config.manualPresets) ? config.manualPresets.map(normalizePresetRecord) : [];
+  const selected = ids.length ? source.filter((item) => ids.includes(item.id)) : source;
+  if (!selected.length) {
+    return res.status(400).json({ error: ids.length ? '未找到可同步的院校记录' : '最近十所院校为空，无法同步' });
+  }
+
+  const incoming = selected.map((item) => ({
+    schoolName: item.schoolName,
+    collegeName: item.collegeName || '',
+    includeCollegePages: item.includeCollegePages !== false
+  }));
+  const before = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools.length : 0;
+  config.quickAdjustmentSchools = mergeQuickSchoolRecords(config.quickAdjustmentSchools || [], incoming, 10);
+  await writeConfig(config);
+  res.json({
+    ok: true,
+    syncedCount: Math.max(0, config.quickAdjustmentSchools.length - before),
+    schools: config.quickAdjustmentSchools
+  });
+});
+
 app.post('/api/manual-presets/delete-many', async (req, res) => {
   const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map((x) => String(x)) : [];
   if (!ids.length) {

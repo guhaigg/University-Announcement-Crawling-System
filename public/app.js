@@ -31,6 +31,8 @@ const manualMarkdownOutputMode = document.getElementById('manualMarkdownOutputMo
 const manualPresetList = document.getElementById('manual-preset-list');
 const presetSelectAllBtn = document.getElementById('preset-select-all');
 const presetInvertBtn = document.getElementById('preset-invert');
+const presetSyncNewsBtn = document.getElementById('preset-sync-news');
+const presetSyncAdjustmentBtn = document.getElementById('preset-sync-adjustment');
 const presetDeleteSelectedBtn = document.getElementById('preset-delete-selected');
 const fileSelectAllBtn = document.getElementById('file-select-all');
 const fileInvertBtn = document.getElementById('file-invert');
@@ -1441,6 +1443,21 @@ function getSelectedPresetIds() {
     .filter(Boolean);
 }
 
+async function syncManualPresets(targetType) {
+  const target = targetType === 'adjustment' ? 'adjustment' : 'news';
+  const ids = getSelectedPresetIds();
+  const payload = ids.length ? { ids } : {};
+  const endpoint = target === 'adjustment' ? '/api/manual-presets/sync-adjustment' : '/api/manual-presets/sync-news';
+  const label = target === 'adjustment' ? '调剂智能导航' : '新公告查询 / 复试检索';
+  const data = await api(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  await Promise.all([loadNewsQuickSchools(), loadAdjustmentQuickSchools()]);
+  const synced = Number(data.syncedCount || 0);
+  showToast(synced > 0 ? `已同步 ${synced} 所院校到${label}` : `目标模块已是最新，无需同步`);
+}
+
 async function verifyLinks(
   homepageUrl,
   crawlMode,
@@ -2383,6 +2400,32 @@ presetInvertBtn.addEventListener('click', () => {
     box.checked = !box.checked;
   });
 });
+
+if (presetSyncNewsBtn) {
+  presetSyncNewsBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(presetSyncNewsBtn, true, '同步中...');
+      await syncManualPresets('news');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(presetSyncNewsBtn, false);
+    }
+  });
+}
+
+if (presetSyncAdjustmentBtn) {
+  presetSyncAdjustmentBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(presetSyncAdjustmentBtn, true, '同步中...');
+      await syncManualPresets('adjustment');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(presetSyncAdjustmentBtn, false);
+    }
+  });
+}
 
 presetDeleteSelectedBtn.addEventListener('click', async () => {
   const ids = getSelectedPresetIds();
