@@ -7,15 +7,29 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <div class="masthead-brand">
+          <strong>高校研招公告工作台</strong>
+          <span>Graduate Notice Desk</span>
+        </div>
+        <div class="module-tabs masthead-nav" id="masthead-nav">
+          <button type="button" data-module="adjustment-module">调剂导航</button>
+          <button type="button" data-module="news-query-module" data-focus="general">新公告</button>
+          <button type="button" data-module="news-query-module" data-focus="retest">复试</button>
+          <button type="button" data-module="adjustment-clean-module">清洗</button>
+          <button type="button" data-module="adjustment-major-test-module">专业测试</button>
+          <button type="button" data-module="files-module">输出</button>
+        </div>
+        <div class="masthead-auth" id="auth-info-card">
+          <span id="auth-welcome-text">未登录</span>
+          <button type="button" id="logout-btn" class="muted hidden">退出登录</button>
+        </div>
+      </div>
+    </header>
+
     <main class="container">
       <section class="card hero-card">
-        <div class="hero-topbar">
-          <div class="hero-meta">Graduate Notice Desk</div>
-          <div class="hero-auth" id="auth-info-card">
-            <span id="auth-welcome-text">未登录</span>
-            <button type="button" id="logout-btn" class="muted hidden">退出登录</button>
-          </div>
-        </div>
         <div class="hero-copy">
           <h1>高校研招公告工作台</h1>
           <p class="subtitle hero-subtitle">面向研究生调剂、复试与院校公告检索场景，支持智能导航、正文抓取、数据清洗、定时任务与 Markdown 归档。</p>
@@ -26,6 +40,7 @@
           <span>调剂清洗</span>
           <span>Markdown 归档</span>
         </div>
+        <p class="subtitle hero-tip">从顶部目录或专题入口进入模块，系统会保留你的筛选条件与固定院校配置。</p>
       </section>
 
       <section class="card sticky-directory-card">
