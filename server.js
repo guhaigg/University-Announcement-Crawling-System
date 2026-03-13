@@ -24,6 +24,16 @@ const SESSION_COOKIE_NAME = 'crawler_sid';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ADMIN_USER = String(process.env.DEFAULT_ADMIN_USER || 'admin').trim() || 'admin';
 const DEFAULT_ADMIN_PASSWORD = String(process.env.DEFAULT_ADMIN_PASSWORD || 'admin123456');
+const IS_PRODUCTION = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+const DEFAULT_ADMIN_PASSWORD_FALLBACK = 'admin123456';
+const LOGIN_RATE_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_RATE_LOCK_MS = 10 * 60 * 1000;
+const LOGIN_RATE_MAX_ATTEMPTS = 8;
+const MUTATING_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const RAW_ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((x) => x.trim())
+  .filter(Boolean);
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
@@ -57,9 +67,8 @@ const KEYWORD_SYNONYM_MAP = {
 const scheduledJobs = new Map();
 const runningTasks = new Set();
 const sessions = new Map();
+const loginAttemptStore = new Map();
 let configMutationQueue = Promise.resolve();
-const remoteHostSafetyCache = new Map();
-const REMOTE_HOST_CACHE_TTL_MS = 5 * 60 * 1000;
 const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '1mb' }));
@@ -67,6 +76,143 @@ app.use(express.static(path.join(ROOT, 'public')));
 
 function nowTs() {
   return Date.now();
+}
+
+function normalizeOriginValue(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  try {
+    const origin = new URL(raw).origin;
+    return origin.toLowerCase().replace(/\/$/, '');
+  } catch (error) {
+    return '';
+  }
+}
+
+function firstHeaderValue(value) {
+  if (Array.isArray(value)) {
+    return String(value[0] || '').trim();
+  }
+  return String(value || '').split(',')[0].trim();
+}
+
+function getSocketClientIp(req) {
+  const raw = String(req?.socket?.remoteAddress || '').trim();
+  if (!raw) return '';
+  return raw.replace(/^::ffff:/i, '');
+}
+
+function isLoopbackIp(ip) {
+  const text = String(ip || '').trim();
+  return text === '::1' || text.startsWith('127.');
+}
+
+function getRequestBaseOrigin(req) {
+  const host = firstHeaderValue(req.headers?.['x-forwarded-host']) || String(req.headers?.host || '').trim();
+  if (!host) return '';
+  const forwardedProto = firstHeaderValue(req.headers?.['x-forwarded-proto']);
+  const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
+  return normalizeOriginValue(`${protocol}://${host}`);
+}
+
+function getAllowedOrigins(req) {
+  const list = RAW_ALLOWED_ORIGINS.map((item) => normalizeOriginValue(item)).filter(Boolean);
+  const base = getRequestBaseOrigin(req);
+  if (base) list.push(base);
+  return new Set(list);
+}
+
+function getRefererOrigin(req) {
+  const referer = String(req.headers?.referer || '').trim();
+  if (!referer) return '';
+  try {
+    return normalizeOriginValue(new URL(referer).origin);
+  } catch (error) {
+    return '';
+  }
+}
+
+function isTrustedMutationRequest(req) {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (!MUTATING_HTTP_METHODS.has(method)) {
+    return true;
+  }
+  const origin = normalizeOriginValue(firstHeaderValue(req.headers?.origin));
+  const refererOrigin = getRefererOrigin(req);
+  const candidate = origin || refererOrigin;
+  if (!candidate) {
+    return isLoopbackIp(getSocketClientIp(req));
+  }
+  return getAllowedOrigins(req).has(candidate);
+}
+
+function purgeExpiredLoginAttempts() {
+  const now = nowTs();
+  for (const [key, state] of loginAttemptStore.entries()) {
+    const blockedUntil = Number(state?.blockedUntil || 0);
+    const lastAttemptAt = Number(state?.lastAttemptAt || 0);
+    if (!blockedUntil && now - lastAttemptAt > LOGIN_RATE_WINDOW_MS) {
+      loginAttemptStore.delete(key);
+      continue;
+    }
+    if (blockedUntil && blockedUntil <= now && now - lastAttemptAt > LOGIN_RATE_WINDOW_MS) {
+      loginAttemptStore.delete(key);
+    }
+  }
+}
+
+function buildLoginRateKeys(req, username) {
+  const ip = getSocketClientIp(req) || 'unknown';
+  const normalizedUser = String(username || '').trim().toLowerCase() || 'unknown';
+  return [`ip:${ip}`, `ip_user:${ip}:${normalizedUser}`];
+}
+
+function getLoginBlockMs(req, username) {
+  purgeExpiredLoginAttempts();
+  const keys = buildLoginRateKeys(req, username);
+  const now = nowTs();
+  let maxRemaining = 0;
+  for (const key of keys) {
+    const state = loginAttemptStore.get(key);
+    if (!state) continue;
+    const blockedUntil = Number(state.blockedUntil || 0);
+    if (blockedUntil > now) {
+      maxRemaining = Math.max(maxRemaining, blockedUntil - now);
+    }
+  }
+  return maxRemaining;
+}
+
+function markLoginFailure(req, username) {
+  const now = nowTs();
+  for (const key of buildLoginRateKeys(req, username)) {
+    const prev = loginAttemptStore.get(key) || { failCount: 0, firstAttemptAt: now, blockedUntil: 0, lastAttemptAt: now };
+    let failCount = Number(prev.failCount || 0);
+    let firstAttemptAt = Number(prev.firstAttemptAt || now);
+    const blockedUntil = Number(prev.blockedUntil || 0);
+    if (blockedUntil > now) {
+      loginAttemptStore.set(key, { ...prev, lastAttemptAt: now });
+      continue;
+    }
+    if (now - firstAttemptAt > LOGIN_RATE_WINDOW_MS) {
+      failCount = 0;
+      firstAttemptAt = now;
+    }
+    failCount += 1;
+    const next = {
+      failCount,
+      firstAttemptAt,
+      lastAttemptAt: now,
+      blockedUntil: failCount >= LOGIN_RATE_MAX_ATTEMPTS ? now + LOGIN_RATE_LOCK_MS : 0
+    };
+    loginAttemptStore.set(key, next);
+  }
+}
+
+function clearLoginFailures(req, username) {
+  for (const key of buildLoginRateKeys(req, username)) {
+    loginAttemptStore.delete(key);
+  }
 }
 
 function parseCookies(headerValue) {
@@ -229,6 +375,9 @@ function authRequired(req, res, next) {
   if (!session) {
     return res.status(401).json({ error: '请先登录' });
   }
+  if (!isTrustedMutationRequest(req)) {
+    return res.status(403).json({ error: '来源校验失败，请在同源页面中重试' });
+  }
   req.authUser = {
     id: session.userId,
     username: session.username
@@ -250,6 +399,9 @@ async function ensureStorage() {
   }
   const userData = await readUsers();
   if (!Array.isArray(userData.users) || userData.users.length === 0) {
+    if (IS_PRODUCTION && DEFAULT_ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD_FALLBACK) {
+      throw new Error('生产环境禁止使用默认管理员密码，请设置 DEFAULT_ADMIN_PASSWORD 后重启');
+    }
     const pass = hashPassword(DEFAULT_ADMIN_PASSWORD);
     const admin = normalizeUserRecord({
       id: 'admin',
@@ -761,34 +913,55 @@ async function assertSafeRemoteUrl(url, sourceLabel = '抓取任务') {
   if (hostCheck.blocked) {
     throw new Error(`${sourceLabel}被安全策略拦截：${hostCheck.reason}`);
   }
-
-  const now = nowTs();
-  const cache = remoteHostSafetyCache.get(host);
-  if (cache && now - cache.checkedAt <= REMOTE_HOST_CACHE_TTL_MS) {
-    if (!cache.allowed) {
-      throw new Error(`${sourceLabel}被安全策略拦截：${cache.reason}`);
-    }
-    return parsed.toString();
-  }
-
-  let addresses = [];
-  try {
-    addresses = await dns.lookup(host, { all: true, verbatim: true });
-  } catch (error) {
-    throw new Error(`${sourceLabel}域名解析失败`);
-  }
-  if (!Array.isArray(addresses) || !addresses.length) {
-    throw new Error(`${sourceLabel}域名解析失败`);
-  }
-
-  const blockedAddress = addresses.find((item) => isBlockedIpAddress(item?.address));
-  const blocked = Boolean(blockedAddress);
-  const reason = blocked ? '禁止访问内网或保留地址' : '';
-  remoteHostSafetyCache.set(host, { checkedAt: now, allowed: !blocked, reason });
-  if (blocked) {
-    throw new Error(`${sourceLabel}被安全策略拦截：${reason}`);
-  }
   return parsed.toString();
+}
+
+function secureDnsLookup(hostname, options, callback) {
+  let cb = callback;
+  let opts = options;
+  if (typeof options === 'function') {
+    cb = options;
+    opts = {};
+  }
+  const done = typeof cb === 'function' ? cb : () => {};
+  (async () => {
+    const host = String(hostname || '').trim().toLowerCase();
+    const hostCheck = isBlockedHostName(host);
+    if (hostCheck.blocked) {
+      throw new Error(`抓取任务被安全策略拦截：${hostCheck.reason}`);
+    }
+
+    const hostFamily = net.isIP(host);
+    if (hostFamily) {
+      if (isBlockedIpAddress(host)) {
+        throw new Error('抓取任务被安全策略拦截：禁止访问内网或保留地址');
+      }
+      return { address: host, family: hostFamily };
+    }
+
+    const familyHint = Number(opts?.family || 0);
+    const lookupOptions = {
+      all: true,
+      verbatim: true
+    };
+    if (familyHint === 4 || familyHint === 6) {
+      lookupOptions.family = familyHint;
+    }
+    const addresses = await dns.lookup(host, lookupOptions);
+    if (!Array.isArray(addresses) || !addresses.length) {
+      throw new Error('抓取任务域名解析失败');
+    }
+    if (addresses.some((item) => isBlockedIpAddress(item?.address))) {
+      throw new Error('抓取任务被安全策略拦截：禁止访问内网或保留地址');
+    }
+    const picked = addresses[0];
+    return {
+      address: picked.address,
+      family: Number(picked.family || net.isIP(picked.address) || 4)
+    };
+  })()
+    .then(({ address, family }) => done(null, address, family))
+    .catch((error) => done(error));
 }
 
 function normalizeUrl(base, href) {
@@ -2023,6 +2196,7 @@ async function safeHttpGet(url, config = {}, maxRedirects = 5) {
     const safeUrl = await assertSafeRemoteUrl(currentUrl, '抓取任务');
     const response = await axios.get(safeUrl, {
       ...config,
+      lookup: secureDnsLookup,
       maxRedirects: 0
     });
     const status = Number(response.status || 0);
@@ -3483,12 +3657,19 @@ app.post('/api/auth/login', async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: '请输入用户名和密码' });
   }
+  const blockedMs = getLoginBlockMs(req, username);
+  if (blockedMs > 0) {
+    res.setHeader('Retry-After', String(Math.ceil(blockedMs / 1000)));
+    return res.status(429).json({ error: `登录失败次数过多，请 ${Math.ceil(blockedMs / 1000)} 秒后重试` });
+  }
   try {
     const userData = await readUsers();
     const user = findUserByUsername(userData.users, username);
     if (!user || !verifyPassword(password, user)) {
+      markLoginFailure(req, username);
       return res.status(401).json({ error: '用户名或密码错误' });
     }
+    clearLoginFailures(req, username);
     const sid = createSession(user);
     setSessionCookie(res, sid);
     return res.json({
