@@ -1427,9 +1427,9 @@ button.danger {
 
 /* Blog-Inspired Redesign */
 :root {
-  --left-rail-width: 190px;
-  --left-rail-gap: 14px;
-  --left-rail-space: calc(var(--left-rail-width) + var(--left-rail-gap) + 18px);
+  --left-rail-width: 146px;
+  --left-rail-gap: 10px;
+  --left-rail-space: calc(var(--left-rail-width) + var(--left-rail-gap) + 12px);
   --bg: #f3f5f9;
   --bg-soft: #f7f9fc;
   --paper: #ffffff;
@@ -1506,7 +1506,7 @@ body::after {
 }
 
 .container {
-  padding: 20px 18px 54px var(--left-rail-space);
+  padding: 20px 12px 54px var(--left-rail-space);
 }
 
 .home-side-left {
@@ -1559,8 +1559,8 @@ body::after {
   border: 1px solid #d8e4f5;
   background: #fff;
   border-radius: 8px;
-  padding: 7px 8px;
-  font-size: 11px;
+  padding: 6px 6px;
+  font-size: 10px;
   color: #334155;
 }
 

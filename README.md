@@ -273,9 +273,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-14 07:44:43（Asia/Shanghai）
+- 最近审核时间：2026-03-14 07:48:51（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：main
-- 最近提交：61b0192 feat: make top and side nav jump to module sections
+- 最近提交：3682219 fix: reserve left rail space to prevent content overlap
 - 当前工作区变更数：1
 <!-- AUTO_REVIEW_END -->
