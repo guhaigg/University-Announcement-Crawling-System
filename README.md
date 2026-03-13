@@ -273,9 +273,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-13 23:32:56（Asia/Shanghai）
+- 最近审核时间：2026-03-13 23:37:08（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：main
-- 最近提交：97302d7 style: tighten module typography and spacing
-- 当前工作区变更数：2
+- 最近提交：ec6eb19 style: condense header status and sidebar modules
+- 当前工作区变更数：3
 <!-- AUTO_REVIEW_END -->

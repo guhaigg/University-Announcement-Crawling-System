@@ -8,25 +8,79 @@
   </head>
   <body>
     <main class="container">
-      <div class="intro-grid">
-        <section class="card hero-card">
+      <section class="card hero-card">
+        <div class="hero-topbar">
           <div class="hero-meta">Graduate Notice Desk</div>
-          <h1>高校研招公告工作台</h1>
-          <p class="subtitle hero-subtitle">面向研究生调剂、复试与院校公告检索场景，支持智能导航、正文抓取、数据清洗、定时任务与 Markdown 归档。</p>
-          <div class="hero-badges">
-            <span>智能导航</span>
-            <span>正文抓取</span>
-            <span>调剂清洗</span>
-            <span>Markdown 归档</span>
-          </div>
-        </section>
-        <section class="card auth-card" id="auth-info-card">
-          <div class="auth-info-row">
+          <div class="hero-auth" id="auth-info-card">
             <span id="auth-welcome-text">未登录</span>
             <button type="button" id="logout-btn" class="muted hidden">退出登录</button>
           </div>
-        </section>
-      </div>
+        </div>
+        <div class="hero-copy">
+          <h1>高校研招公告工作台</h1>
+          <p class="subtitle hero-subtitle">面向研究生调剂、复试与院校公告检索场景，支持智能导航、正文抓取、数据清洗、定时任务与 Markdown 归档。</p>
+        </div>
+        <div class="hero-badges">
+          <span>智能导航</span>
+          <span>正文抓取</span>
+          <span>调剂清洗</span>
+          <span>Markdown 归档</span>
+        </div>
+      </section>
+
+      <section class="card sticky-directory-card">
+        <div class="directory-head">
+          <h2>首页目录</h2>
+          <p class="subtitle">常用入口会固定在顶部，滚动到下方模块时也能快速切换。</p>
+        </div>
+        <div class="module-tabs sticky-directory" id="sticky-directory">
+          <button type="button" data-module="adjustment-module">调剂导航</button>
+          <button type="button" data-module="news-query-module" data-focus="general">新公告</button>
+          <button type="button" data-module="news-query-module" data-focus="retest">复试检索</button>
+          <button type="button" data-module="adjustment-clean-module">数据清洗</button>
+          <button type="button" data-module="adjustment-major-test-module">专业测试</button>
+          <button type="button" data-module="daily-module">每日任务</button>
+          <button type="button" data-module="manual-module">自助爬取</button>
+          <button type="button" data-module="files-module">输出文件</button>
+        </div>
+      </section>
+
+      <section class="card feature-showcase">
+        <h2>专题入口</h2>
+        <p class="subtitle">把高频模块做成封面卡片，你可以像点博客专栏一样直接进入对应功能。</p>
+        <div class="feature-grid" id="feature-grid">
+          <button type="button" class="feature-card feature-card-primary" data-module="adjustment-module">
+            <span class="feature-kicker">Core</span>
+            <strong>研究生调剂智能导航</strong>
+            <em>按院校与学院智能匹配官网、研招入口和学院页面，适合作为第一步。</em>
+          </button>
+          <button type="button" class="feature-card" data-module="news-query-module" data-focus="general">
+            <span class="feature-kicker">Recent</span>
+            <strong>院校新公告查询</strong>
+            <em>聚焦近三日研招公告，支持日期、关键词与页内浏览。</em>
+          </button>
+          <button type="button" class="feature-card" data-module="news-query-module" data-focus="retest">
+            <span class="feature-kicker">Focus</span>
+            <strong>复试内容检索</strong>
+            <em>重点搜索复试、名单、安排、资格等内容，适合高频盯盘。</em>
+          </button>
+          <button type="button" class="feature-card" data-module="adjustment-clean-module">
+            <span class="feature-kicker">Clean</span>
+            <strong>调剂数据清洗</strong>
+            <em>按来源、年份、关键词和名额提取对调剂信息做清洗整理。</em>
+          </button>
+          <button type="button" class="feature-card" data-module="adjustment-major-test-module">
+            <span class="feature-kicker">Major</span>
+            <strong>专业调剂测试</strong>
+            <em>从专业反推院校并结合官网正文过滤，适合按专业找机会。</em>
+          </button>
+          <button type="button" class="feature-card" data-module="daily-module">
+            <span class="feature-kicker">Automation</span>
+            <strong>每日任务与归档</strong>
+            <em>把长期跟踪的院校固化为每日任务，结果统一沉淀到 Markdown 输出区。</em>
+          </button>
+        </div>
+      </section>
 
       <section class="card">
         <h2>功能导航</h2>

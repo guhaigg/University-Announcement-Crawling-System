@@ -41,6 +41,8 @@ const fileCleanSelectedBtn = document.getElementById('file-clean-selected');
 const fileDeleteSelectedBtn = document.getElementById('file-delete-selected');
 const fileDeleteAllBtn = document.getElementById('file-delete-all');
 const moduleTabs = document.getElementById('module-tabs');
+const stickyDirectory = document.getElementById('sticky-directory');
+const featureGrid = document.getElementById('feature-grid');
 const modulePanels = Array.from(document.querySelectorAll('.module-panel'));
 
 const scanPanel = document.getElementById('scan-panel');
@@ -1626,17 +1628,36 @@ function normalizeNewsFocus(value) {
 }
 
 function syncModuleTabsActiveState() {
-  if (!moduleTabs) return;
   activeNewsQueryFocus = normalizeNewsFocus(newsQueryFocus?.value || activeNewsQueryFocus);
-  moduleTabs.querySelectorAll('button[data-module]').forEach((btn) => {
-    const targetModule = btn.dataset.module;
-    const hasFocus = Object.prototype.hasOwnProperty.call(btn.dataset, 'focus');
-    if (targetModule === 'news-query-module' && hasFocus) {
-      const targetFocus = normalizeNewsFocus(btn.dataset.focus);
-      btn.classList.toggle('active', activeModuleId === 'news-query-module' && activeNewsQueryFocus === targetFocus);
-      return;
-    }
-    btn.classList.toggle('active', targetModule === activeModuleId);
+  [moduleTabs, stickyDirectory, featureGrid].forEach((container) => {
+    if (!container) return;
+    container.querySelectorAll('[data-module]').forEach((btn) => {
+      const targetModule = btn.dataset.module;
+      const hasFocus = Object.prototype.hasOwnProperty.call(btn.dataset, 'focus');
+      if (targetModule === 'news-query-module' && hasFocus) {
+        const targetFocus = normalizeNewsFocus(btn.dataset.focus);
+        btn.classList.toggle('active', activeModuleId === 'news-query-module' && activeNewsQueryFocus === targetFocus);
+        return;
+      }
+      btn.classList.toggle('active', targetModule === activeModuleId);
+    });
+  });
+}
+
+function handleModuleNavigation(btn) {
+  if (!btn) return;
+  if (btn.dataset.module === 'news-query-module' && Object.prototype.hasOwnProperty.call(btn.dataset, 'focus')) {
+    applyNewsQueryFocusUI(btn.dataset.focus);
+  }
+  switchModule(btn.dataset.module);
+}
+
+function bindModuleNavigation(container) {
+  if (!container) return;
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-module]');
+    if (!btn) return;
+    handleModuleNavigation(btn);
   });
 }
 
@@ -3209,16 +3230,9 @@ document.getElementById('manual-verify-btn').addEventListener('click', async () 
 
 document.getElementById('reset-btn').addEventListener('click', resetTaskForm);
 
-if (moduleTabs) {
-  moduleTabs.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-module]');
-    if (!btn) return;
-    if (btn.dataset.module === 'news-query-module' && Object.prototype.hasOwnProperty.call(btn.dataset, 'focus')) {
-      applyNewsQueryFocusUI(btn.dataset.focus);
-    }
-    switchModule(btn.dataset.module);
-  });
-}
+bindModuleNavigation(moduleTabs);
+bindModuleNavigation(stickyDirectory);
+bindModuleNavigation(featureGrid);
 
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {
