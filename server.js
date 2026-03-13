@@ -894,21 +894,32 @@ function extractAdjustmentYearText(value) {
 function buildAdjustmentSearchQueries(options = {}, source = 'yanzhao') {
   const schoolName = String(options.schoolName || '').trim();
   const majorKeyword = String(options.majorKeyword || '').trim();
+  const majorOnly = normalizeBooleanFlag(options.majorOnly, false);
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const extraKeywords = parseKeywords(options.keywords || '');
   const host = ADJUSTMENT_SOURCE_HOSTS[normalizeAdjustmentSource(source)] || ADJUSTMENT_SOURCE_HOSTS.yanzhao;
   const sourceLabel = getAdjustmentSourceLabel(source);
 
-  const baseTokens = [schoolName, majorKeyword, targetYear, '研究生', '调剂'].filter(Boolean);
-  const querySeeds = [
-    `${baseTokens.join(' ')} site:${host}`,
-    `${schoolName} ${majorKeyword || ''} 调剂 公告 site:${host}`.replace(/\s+/g, ' ').trim(),
-    `${schoolName} 研究生 调剂 名额 site:${host}`,
-    `${schoolName} 调剂 复试 site:${host}`,
-    `${schoolName} ${sourceLabel} 调剂 site:${host}`
-  ];
+  const querySeeds = [];
+  const schoolTokens = majorOnly ? [] : [schoolName];
+  const baseTokens = [...schoolTokens, majorKeyword, targetYear, '研究生', '调剂'].filter(Boolean);
+  if (baseTokens.length) {
+    querySeeds.push(`${baseTokens.join(' ')} site:${host}`);
+  }
+  if (majorOnly) {
+    querySeeds.push(`${majorKeyword} 研究生 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorKeyword} 调剂 名额 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorKeyword} 复试 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${majorKeyword} ${sourceLabel} 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+  } else {
+    querySeeds.push(`${schoolName} ${majorKeyword || ''} 调剂 公告 site:${host}`.replace(/\s+/g, ' ').trim());
+    querySeeds.push(`${schoolName} 研究生 调剂 名额 site:${host}`);
+    querySeeds.push(`${schoolName} 调剂 复试 site:${host}`);
+    querySeeds.push(`${schoolName} ${sourceLabel} 调剂 site:${host}`);
+  }
   if (extraKeywords.length) {
-    querySeeds.unshift(`${schoolName} ${extraKeywords.slice(0, 3).join(' ')} 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
+    const prefix = majorOnly ? majorKeyword : schoolName;
+    querySeeds.unshift(`${prefix} ${extraKeywords.slice(0, 3).join(' ')} 调剂 site:${host}`.replace(/\s+/g, ' ').trim());
   }
   return Array.from(new Set(querySeeds.map((x) => x.trim()).filter(Boolean))).slice(0, 6);
 }
@@ -916,6 +927,7 @@ function buildAdjustmentSearchQueries(options = {}, source = 'yanzhao') {
 function scoreAdjustmentSearchItem(item, source, options = {}) {
   const schoolName = String(options.schoolName || '').trim();
   const majorKeyword = String(options.majorKeyword || '').trim();
+  const majorOnly = normalizeBooleanFlag(options.majorOnly, false);
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const host = ADJUSTMENT_SOURCE_HOSTS[normalizeAdjustmentSource(source)] || '';
   const combined = `${item.title || ''} ${item.url || ''} ${item.snippet || ''}`;
@@ -930,6 +942,8 @@ function scoreAdjustmentSearchItem(item, source, options = {}) {
   if (/复试|录取|分数线/.test(combined)) score += 8;
   if (/经验|求助|请教|闲聊|八卦/.test(combined)) score -= 50;
   if (/login|passport|cas/.test(String(item.url || '').toLowerCase())) score -= 40;
+  if (majorOnly && !majorKeyword) score -= 120;
+  if (majorOnly && majorKeyword && !combined.includes(majorKeyword)) score -= 26;
 
   try {
     const hostname = new URL(item.url).hostname.toLowerCase();
@@ -991,11 +1005,14 @@ function buildAdjustmentItemKey(item) {
 function buildAdjustmentQueryKeywords(options = {}) {
   const schoolName = String(options.schoolName || '').trim();
   const majorKeyword = String(options.majorKeyword || '').trim();
+  const majorOnly = normalizeBooleanFlag(options.majorOnly, false);
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const userKeywords = parseKeywords(options.keywords || '');
   return Array.from(
     new Set(
-      [schoolName, majorKeyword, targetYear, ...userKeywords, '调剂', '接收调剂', '缺额', '名额', '复试', '研究生招生'].filter((x) => String(x || '').trim())
+      [(majorOnly ? '' : schoolName), majorKeyword, targetYear, ...userKeywords, '调剂', '接收调剂', '缺额', '名额', '复试', '研究生招生'].filter((x) =>
+        String(x || '').trim()
+      )
     )
   );
 }
@@ -1088,21 +1105,26 @@ async function enrichAdjustmentCandidate(candidate, options = {}, keywordMatcher
 async function runAdjustmentDataCleaning(options = {}) {
   const schoolName = String(options.schoolName || '').trim();
   const majorKeyword = String(options.majorKeyword || '').trim();
+  const majorOnly = normalizeBooleanFlag(options.majorOnly, false);
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const keywords = parseKeywords(options.keywords || '');
   const cleaningLevel = normalizeCleaningLevel(options.cleaningLevel);
   const sources = normalizeAdjustmentSources(options.sources);
   const limit = Math.max(5, Math.min(80, Number(options.limit) || 30));
-  if (!schoolName) {
-    throw new Error('请输入院校名称');
+  if (!majorOnly && !schoolName) {
+    throw new Error('请输入院校名称，或启用仅按专业搜索');
+  }
+  if (majorOnly && !majorKeyword) {
+    throw new Error('仅按专业搜索时，必须填写专业/学院关键词');
   }
 
-  const keywordMatchers = buildKeywordMatchers(buildAdjustmentQueryKeywords({ schoolName, majorKeyword, targetYear, keywords }));
+  const keywordMatchers = buildKeywordMatchers(buildAdjustmentQueryKeywords({ schoolName, majorKeyword, majorOnly, targetYear, keywords }));
   const sourceCandidates = await Promise.all(
     sources.map(async (source) => {
       const candidates = await searchAdjustmentCandidatesBySource(source, {
         schoolName,
         majorKeyword,
+        majorOnly,
         targetYear,
         keywords,
         limitPerQuery: 10,
@@ -1133,11 +1155,15 @@ async function runAdjustmentDataCleaning(options = {}) {
     try {
       const item = await enrichAdjustmentCandidate(candidate, { cleaningLevel }, keywordMatchers);
       if (!item.title || !item.url) continue;
+      const textForMajor = normalizeMatchText(`${item.title} ${item.cleanedContent}`);
+      const normalizedMajor = normalizeMatchText(majorKeyword);
+      const hasMajorHit = normalizedMajor ? textForMajor.includes(normalizedMajor) : false;
       const keep =
         item.adjustmentHits > 0 ||
         item.keywordScore > 0 ||
         item.quotaNumbers.length > 0 ||
-        (majorKeyword && `${item.title} ${item.cleanedContent}`.includes(majorKeyword));
+        hasMajorHit;
+      if (majorOnly && normalizedMajor && !hasMajorHit && item.keywordScore <= 0 && item.quotaNumbers.length <= 0) continue;
       if (!keep) continue;
       const key = buildAdjustmentItemKey(item);
       const old = itemMap.get(key);
@@ -1175,6 +1201,7 @@ async function runAdjustmentDataCleaning(options = {}) {
     query: {
       schoolName,
       majorKeyword,
+      majorOnly,
       targetYear,
       keywords,
       cleaningLevel,
@@ -1191,10 +1218,11 @@ function buildAdjustmentCleaningMarkdown(result, selectedItems = []) {
   const query = sourceResult.query || {};
   const items = Array.isArray(selectedItems) && selectedItems.length ? selectedItems : Array.isArray(sourceResult.items) ? sourceResult.items : [];
   const lines = [];
-  lines.push(`# 调剂数据清洗报告 - ${query.schoolName || '未命名院校'}`);
+  lines.push(`# 调剂数据清洗报告 - ${query.schoolName || query.majorKeyword || '未命名查询'}`);
   lines.push('');
   lines.push(`- 生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`);
   lines.push(`- 院校: ${query.schoolName || '-'}`);
+  lines.push(`- 搜索模式: ${query.majorOnly ? '仅按专业搜索（不限定院校）' : '院校+专业联合搜索'}`);
   lines.push(`- 专业关键词: ${query.majorKeyword || '-'}`);
   lines.push(`- 年份: ${query.targetYear || '-'}`);
   lines.push(`- 检索来源: ${(Array.isArray(query.sources) ? query.sources : []).map(getAdjustmentSourceLabel).join(' / ') || '-'}`);
@@ -1251,8 +1279,8 @@ function buildAdjustmentCleaningMarkdown(result, selectedItems = []) {
 
 async function writeAdjustmentCleaningMarkdown(result, selectedItems = []) {
   const query = result?.query || {};
-  const schoolName = sanitizeFilename(String(query.schoolName || '调剂数据'));
-  const fileName = `${schoolName}_调剂数据清洗_${nowFilenameStamp()}.md`;
+  const nameSeed = sanitizeFilename(String(query.schoolName || query.majorKeyword || '调剂数据'));
+  const fileName = `${nameSeed}_调剂数据清洗_${nowFilenameStamp()}.md`;
   const content = buildAdjustmentCleaningMarkdown(result, selectedItems);
   const filePath = path.join(OUTPUT_DIR, fileName);
   await fsp.writeFile(filePath, content, 'utf8');
@@ -4719,6 +4747,7 @@ app.post('/api/adjustment-clean/query', async (req, res) => {
       keywords: body.keywords,
       cleaningLevel: body.cleaningLevel,
       sources: body.sources,
+      majorOnly: body.majorOnly,
       limit: body.limit
     });
     res.json({ ok: true, result });

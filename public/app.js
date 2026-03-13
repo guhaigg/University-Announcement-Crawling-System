@@ -104,6 +104,7 @@ const adjustmentCleanMajor = document.getElementById('adjustment-clean-major');
 const adjustmentCleanYear = document.getElementById('adjustment-clean-year');
 const adjustmentCleanKeywords = document.getElementById('adjustment-clean-keywords');
 const adjustmentCleanLevel = document.getElementById('adjustment-clean-level');
+const adjustmentCleanMajorOnly = document.getElementById('adjustment-clean-major-only');
 const adjustmentCleanLimit = document.getElementById('adjustment-clean-limit');
 const adjustmentCleanRunBtn = document.getElementById('adjustment-clean-run-btn');
 const adjustmentCleanExportBtn = document.getElementById('adjustment-clean-export-btn');
@@ -271,6 +272,17 @@ function normalizeAdjustmentCleanSource(value) {
 
 function getAdjustmentCleanSourceLabel(value) {
   return normalizeAdjustmentCleanSource(value) === 'muchong' ? '小木虫' : '研招网';
+}
+
+function syncAdjustmentCleanModeUI() {
+  if (!adjustmentCleanSchool || !adjustmentCleanMajorOnly) return;
+  const majorOnly = Boolean(adjustmentCleanMajorOnly.checked);
+  adjustmentCleanSchool.disabled = majorOnly;
+  if (majorOnly) {
+    adjustmentCleanSchool.placeholder = '已启用仅按专业搜索（院校已忽略）';
+  } else {
+    adjustmentCleanSchool.placeholder = '例如：四川轻化工大学（可留空）';
+  }
 }
 
 function getMarkdownOutputModeLabel(value) {
@@ -641,11 +653,12 @@ function getAdjustmentCleanSelectedItems() {
 function refreshAdjustmentCleanSummary() {
   if (!adjustmentCleanState || !adjustmentCleanSummary) return;
   const summary = adjustmentCleanState.summary || {};
+  const majorOnly = Boolean(adjustmentCleanState.query?.majorOnly);
   const filteredCount = Array.isArray(adjustmentCleanState.filteredItems) ? adjustmentCleanState.filteredItems.length : 0;
   const selectedCount = getAdjustmentCleanSelectedItems().length;
   const sourceSummary = summary.sourceSummary || {};
   adjustmentCleanSummary.textContent =
-    `共 ${summary.total || 0} 条，名额命中 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条，` +
+    `${majorOnly ? '模式：仅按专业搜索；' : ''}共 ${summary.total || 0} 条，名额命中 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条，` +
     `研招网 ${sourceSummary.yanzhao || 0} 条，小木虫 ${sourceSummary.muchong || 0} 条，` +
     `当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。`;
 }
@@ -799,6 +812,7 @@ async function runAdjustmentCleanQuickQuery(item) {
     keywords: String(adjustmentCleanKeywords?.value || '').trim(),
     cleaningLevel: normalizeCleaningLevel(adjustmentCleanLevel?.value || 'standard'),
     sources: getAdjustmentCleanSelectedSourcesFromForm(),
+    majorOnly: Boolean(adjustmentCleanMajorOnly?.checked),
     limit: Number(adjustmentCleanLimit?.value || 30)
   };
   try {
@@ -2342,18 +2356,25 @@ if (newsQueryList) {
 if (adjustmentCleanForm) {
   adjustmentCleanForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const majorOnly = Boolean(adjustmentCleanMajorOnly?.checked);
     const schoolName = String(adjustmentCleanSchool?.value || '').trim();
-    if (!schoolName) {
-      showToast('请先填写院校名称', true);
+    const majorKeyword = String(adjustmentCleanMajor?.value || '').trim();
+    if (!majorOnly && !schoolName) {
+      showToast('请先填写院校名称，或勾选“仅按专业搜索”', true);
+      return;
+    }
+    if (majorOnly && !majorKeyword) {
+      showToast('仅按专业搜索时，请填写专业/学院关键词', true);
       return;
     }
     const payload = {
       schoolName,
-      majorKeyword: String(adjustmentCleanMajor?.value || '').trim(),
+      majorKeyword,
       targetYear: String(adjustmentCleanYear?.value || '').trim(),
       keywords: String(adjustmentCleanKeywords?.value || '').trim(),
       cleaningLevel: normalizeCleaningLevel(adjustmentCleanLevel?.value || 'standard'),
       sources: getAdjustmentCleanSelectedSourcesFromForm(),
+      majorOnly,
       limit: Number(adjustmentCleanLimit?.value || 30)
     };
     try {
@@ -2370,6 +2391,12 @@ if (adjustmentCleanForm) {
     } finally {
       setButtonBusy(adjustmentCleanRunBtn, false);
     }
+  });
+}
+
+if (adjustmentCleanMajorOnly) {
+  adjustmentCleanMajorOnly.addEventListener('change', () => {
+    syncAdjustmentCleanModeUI();
   });
 }
 
@@ -3098,6 +3125,7 @@ manualCrawlMode.addEventListener('change', () => {
 async function init() {
   updateCollegeToggleByMode(taskCrawlMode, taskIncludeCollegePages);
   updateCollegeToggleByMode(manualCrawlMode, manualIncludeCollegePages);
+  syncAdjustmentCleanModeUI();
   applyNewsQueryFocusUI(activeNewsQueryFocus);
   switchModule('adjustment-module');
   const loggedIn = await ensureAuthStatus();
