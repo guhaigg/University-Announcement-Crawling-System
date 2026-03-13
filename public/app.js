@@ -41,7 +41,8 @@ const fileCleanSelectedBtn = document.getElementById('file-clean-selected');
 const fileDeleteSelectedBtn = document.getElementById('file-delete-selected');
 const fileDeleteAllBtn = document.getElementById('file-delete-all');
 const moduleTabs = document.getElementById('module-tabs');
-const stickyDirectory = document.getElementById('sticky-directory');
+const functionDrawerToggle = document.getElementById('function-drawer-toggle');
+const functionDrawerBody = document.getElementById('function-drawer-body');
 const featureGrid = document.getElementById('feature-grid');
 const mastheadNav = document.getElementById('masthead-nav');
 const modulePanels = Array.from(document.querySelectorAll('.module-panel'));
@@ -1630,7 +1631,7 @@ function normalizeNewsFocus(value) {
 
 function syncModuleTabsActiveState() {
   activeNewsQueryFocus = normalizeNewsFocus(newsQueryFocus?.value || activeNewsQueryFocus);
-  [mastheadNav, moduleTabs, stickyDirectory, featureGrid].forEach((container) => {
+  [mastheadNav, moduleTabs, featureGrid].forEach((container) => {
     if (!container) return;
     container.querySelectorAll('[data-module]').forEach((btn) => {
       const targetModule = btn.dataset.module;
@@ -1645,8 +1646,28 @@ function syncModuleTabsActiveState() {
   });
 }
 
+function applyScenarioPreset(btn) {
+  if (!btn || !btn.dataset) return;
+  const adjustmentPresetKeywords = String(btn.dataset.adjustmentKeywords || '').trim();
+  if (adjustmentPresetKeywords && adjustmentKeywords) {
+    adjustmentKeywords.value = adjustmentPresetKeywords;
+  }
+  const newsDayPreset = String(btn.dataset.newsDay || '').trim();
+  if (newsDayPreset && newsQueryDayFilter) {
+    const matched = Array.from(newsQueryDayFilter.options || []).some((option) => option.value === newsDayPreset);
+    if (matched) {
+      newsQueryDayFilter.value = newsDayPreset;
+    }
+  }
+  const newsKeywordPreset = String(btn.dataset.newsKeyword || '').trim();
+  if (newsKeywordPreset && newsQueryKeywordFilter) {
+    newsQueryKeywordFilter.value = newsKeywordPreset;
+  }
+}
+
 function handleModuleNavigation(btn) {
   if (!btn) return;
+  applyScenarioPreset(btn);
   if (btn.dataset.module === 'news-query-module' && Object.prototype.hasOwnProperty.call(btn.dataset, 'focus')) {
     applyNewsQueryFocusUI(btn.dataset.focus);
   }
@@ -3232,9 +3253,17 @@ document.getElementById('manual-verify-btn').addEventListener('click', async () 
 document.getElementById('reset-btn').addEventListener('click', resetTaskForm);
 
 bindModuleNavigation(moduleTabs);
-bindModuleNavigation(stickyDirectory);
 bindModuleNavigation(featureGrid);
 bindModuleNavigation(mastheadNav);
+
+if (functionDrawerToggle && functionDrawerBody) {
+  functionDrawerToggle.addEventListener('click', () => {
+    const isHidden = functionDrawerBody.classList.contains('hidden');
+    functionDrawerBody.classList.toggle('hidden', !isHidden);
+    functionDrawerToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+    functionDrawerToggle.textContent = isHidden ? '收起功能目录' : '展开功能目录';
+  });
+}
 
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {

@@ -43,74 +43,62 @@
         <p class="subtitle hero-tip">从顶部目录或专题入口进入模块，系统会保留你的筛选条件与固定院校配置。</p>
       </section>
 
-      <section class="card sticky-directory-card">
-        <div class="directory-head">
-          <h2>首页目录</h2>
-          <p class="subtitle">常用入口会固定在顶部，滚动到下方模块时也能快速切换。</p>
-        </div>
-        <div class="module-tabs sticky-directory" id="sticky-directory">
-          <button type="button" data-module="adjustment-module">调剂导航</button>
-          <button type="button" data-module="news-query-module" data-focus="general">新公告</button>
-          <button type="button" data-module="news-query-module" data-focus="retest">复试检索</button>
-          <button type="button" data-module="adjustment-clean-module">数据清洗</button>
-          <button type="button" data-module="adjustment-major-test-module">专业测试</button>
-          <button type="button" data-module="daily-module">每日任务</button>
-          <button type="button" data-module="manual-module">自助爬取</button>
-          <button type="button" data-module="files-module">输出文件</button>
-        </div>
-      </section>
-
       <section class="card feature-showcase">
-        <h2>专题入口</h2>
-        <p class="subtitle">把高频模块做成封面卡片，你可以像点博客专栏一样直接进入对应功能。</p>
+        <h2>专题场景入口</h2>
+        <p class="subtitle">每张卡片都带有推荐预设，不再只是重复跳转，你可以直接进入对应工作流。</p>
         <div class="feature-grid" id="feature-grid">
-          <button type="button" class="feature-card feature-card-primary" data-module="adjustment-module">
-            <span class="feature-kicker">Core</span>
-            <strong>研究生调剂智能导航</strong>
-            <em>按院校与学院智能匹配官网、研招入口和学院页面，适合作为第一步。</em>
+          <button type="button" class="feature-card feature-card-primary" data-module="adjustment-module" data-adjustment-keywords="调剂,缺额,接受调剂">
+            <span class="feature-kicker">Workflow</span>
+            <strong>调剂入口快速定位</strong>
+            <em>自动切到调剂导航并预填关键词，适合先找院校研招入口再做候选扫描。</em>
           </button>
-          <button type="button" class="feature-card" data-module="news-query-module" data-focus="general">
-            <span class="feature-kicker">Recent</span>
-            <strong>院校新公告查询</strong>
-            <em>聚焦近三日研招公告，支持日期、关键词与页内浏览。</em>
+          <button type="button" class="feature-card" data-module="news-query-module" data-focus="general" data-news-day="today" data-news-keyword="调剂,招生,公告">
+            <span class="feature-kicker">Today</span>
+            <strong>今日新公告盯盘</strong>
+            <em>切到新公告查询并预设今日筛选，适合每天快速查看是否有新增研招信息。</em>
           </button>
-          <button type="button" class="feature-card" data-module="news-query-module" data-focus="retest">
+          <button type="button" class="feature-card" data-module="news-query-module" data-focus="retest" data-news-day="today" data-news-keyword="复试,名单,资格审查">
             <span class="feature-kicker">Focus</span>
-            <strong>复试内容检索</strong>
-            <em>重点搜索复试、名单、安排、资格等内容，适合高频盯盘。</em>
+            <strong>复试高频检索</strong>
+            <em>自动切到复试模式并预设关键词，优先筛查复试通知、名单和资格审查动态。</em>
           </button>
           <button type="button" class="feature-card" data-module="adjustment-clean-module">
             <span class="feature-kicker">Clean</span>
             <strong>调剂数据清洗</strong>
-            <em>按来源、年份、关键词和名额提取对调剂信息做清洗整理。</em>
+            <em>对抓取结果做来源归类、关键词匹配与名额提取，提升后续检索命中率。</em>
           </button>
           <button type="button" class="feature-card" data-module="adjustment-major-test-module">
             <span class="feature-kicker">Major</span>
-            <strong>专业调剂测试</strong>
-            <em>从专业反推院校并结合官网正文过滤，适合按专业找机会。</em>
+            <strong>按专业反查机会</strong>
+            <em>进入专业调剂测试模块，从专业库反推院校并结合官网正文做二次匹配。</em>
           </button>
           <button type="button" class="feature-card" data-module="daily-module">
             <span class="feature-kicker">Automation</span>
             <strong>每日任务与归档</strong>
-            <em>把长期跟踪的院校固化为每日任务，结果统一沉淀到 Markdown 输出区。</em>
+            <em>查看或维护自动任务，把长期跟踪院校的结果持续沉淀到 Markdown 输出区。</em>
           </button>
         </div>
       </section>
 
-      <section class="card">
-        <h2>功能导航</h2>
-        <p class="subtitle">建议先用“调剂智能导航”或“新公告查询”定位入口，再在“候选确认”里勾选需要抓取的公告，最后到“Markdown 输出”统一查看结果。</p>
-        <div class="module-tabs" id="module-tabs">
-          <button type="button" data-module="adjustment-module">调剂智能导航</button>
-          <button type="button" data-module="adjustment-clean-module">调剂数据清洗</button>
-          <button type="button" data-module="adjustment-major-test-module">专业调剂测试</button>
-          <button type="button" data-module="news-query-module" data-focus="general">新公告查询</button>
-          <button type="button" data-module="news-query-module" data-focus="retest">复试内容检索</button>
-          <button type="button" data-module="daily-module">每日任务</button>
-          <button type="button" data-module="manual-module">自助爬取</button>
-          <button type="button" data-module="scan-panel">候选确认</button>
-          <button type="button" data-module="tasks-module">任务列表</button>
-          <button type="button" data-module="files-module">Markdown 输出</button>
+      <section class="card function-drawer-card">
+        <div class="drawer-head">
+          <h2>全部功能</h2>
+          <button type="button" id="function-drawer-toggle" class="muted" aria-expanded="false" aria-controls="function-drawer-body">展开功能目录</button>
+        </div>
+        <p class="subtitle">默认收起避免首页重复；需要完整入口时再展开。</p>
+        <div id="function-drawer-body" class="hidden">
+          <div class="module-tabs" id="module-tabs">
+            <button type="button" data-module="adjustment-module">调剂智能导航</button>
+            <button type="button" data-module="adjustment-clean-module">调剂数据清洗</button>
+            <button type="button" data-module="adjustment-major-test-module">专业调剂测试</button>
+            <button type="button" data-module="news-query-module" data-focus="general">新公告查询</button>
+            <button type="button" data-module="news-query-module" data-focus="retest">复试内容检索</button>
+            <button type="button" data-module="daily-module">每日任务</button>
+            <button type="button" data-module="manual-module">自助爬取</button>
+            <button type="button" data-module="scan-panel">候选确认</button>
+            <button type="button" data-module="tasks-module">任务列表</button>
+            <button type="button" data-module="files-module">Markdown 输出</button>
+          </div>
         </div>
       </section>
 
