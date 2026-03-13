@@ -80,7 +80,13 @@ COOKIE_SECURE=true
 npm start
 npm run dev
 npm run check
+npm run review
+npm run readme:update
 ```
+
+- `npm run check`：执行基础审核（语法检查），并在完成后自动刷新 README 中的“自动审核记录”
+- `npm run review`：与 `npm run check` 等价，便于统一“改完先审核”的使用习惯
+- `npm run readme:update`：仅手动刷新 README 的自动审核记录
 
 ## GitHub Actions
 
@@ -101,3 +107,13 @@ npm run check
 
 - 本项目适合信息收集与辅助整理，不保证所有高校站点都能 100% 自动识别
 - 部分网站存在反爬策略或临时访问限制，查询失败时可稍后重试
+
+## 自动审核记录
+
+<!-- AUTO_REVIEW_START -->
+- 最近审核时间：2026-03-13 23:03:11（Asia/Shanghai）
+- 审核命令：`npm run check`
+- 当前分支：main
+- 最近提交：96cb3af feat: add major test cache management panel and APIs
+- 当前工作区变更数：3
+<!-- AUTO_REVIEW_END -->
