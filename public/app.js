@@ -36,6 +36,8 @@ const presetSyncAdjustmentBtn = document.getElementById('preset-sync-adjustment'
 const presetDeleteSelectedBtn = document.getElementById('preset-delete-selected');
 const fileSelectAllBtn = document.getElementById('file-select-all');
 const fileInvertBtn = document.getElementById('file-invert');
+const fileCleaningLevelSelect = document.getElementById('file-cleaning-level');
+const fileCleanSelectedBtn = document.getElementById('file-clean-selected');
 const fileDeleteSelectedBtn = document.getElementById('file-delete-selected');
 const fileDeleteAllBtn = document.getElementById('file-delete-all');
 const moduleTabs = document.getElementById('module-tabs');
@@ -224,6 +226,12 @@ function normalizeMode(mode) {
 
 function normalizeMarkdownOutputMode(value) {
   return String(value || '').trim() === 'separate' ? 'separate' : 'merged';
+}
+
+function normalizeCleaningLevel(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'loose' || text === 'strict') return text;
+  return 'standard';
 }
 
 function getMarkdownOutputModeLabel(value) {
@@ -2520,6 +2528,31 @@ if (fileInvertBtn) {
 if (fileDeleteSelectedBtn) {
   fileDeleteSelectedBtn.addEventListener('click', async () => {
     await deleteFilesByNames(getSelectedFileNames(), fileDeleteSelectedBtn);
+  });
+}
+
+if (fileCleanSelectedBtn) {
+  fileCleanSelectedBtn.addEventListener('click', async () => {
+    const names = getSelectedFileNames();
+    if (!names.length) {
+      showToast('请先勾选要清洗的 Markdown 文件', true);
+      return;
+    }
+    const cleaningLevel = normalizeCleaningLevel(fileCleaningLevelSelect?.value || 'standard');
+    try {
+      setButtonBusy(fileCleanSelectedBtn, true, '清洗中...');
+      const data = await api('/api/files/clean-many', {
+        method: 'POST',
+        body: JSON.stringify({ names, cleaningLevel })
+      });
+      await loadFiles();
+      const generated = Array.isArray(data.fileNames) ? data.fileNames.length : 0;
+      showToast(generated > 0 ? `已清洗并生成 ${generated} 个文件` : '清洗完成');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(fileCleanSelectedBtn, false);
+    }
   });
 }
 

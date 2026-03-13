@@ -552,6 +552,25 @@ function normalizeMarkdownOutputMode(value) {
   return String(value || '').trim() === 'separate' ? 'separate' : 'merged';
 }
 
+function normalizeCleaningLevel(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'normal') return 'standard';
+  if (text === 'loose' || text === 'strict') return text;
+  return 'standard';
+}
+
+function normalizeBooleanFlag(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1') return true;
+  if (value === 0 || value === '0') return false;
+  if (typeof value === 'string') {
+    const text = value.trim().toLowerCase();
+    if (text === 'true' || text === 'yes' || text === 'on') return true;
+    if (text === 'false' || text === 'no' || text === 'off') return false;
+  }
+  return Boolean(defaultValue);
+}
+
 async function revealFileInOs(fullPath) {
   const safePath = path.resolve(fullPath);
   if (process.platform === 'darwin') {
@@ -640,6 +659,9 @@ function normalizeTaskRecord(taskLike) {
     announcementUrls: announcementCombined.urls,
     keywords: parseKeywords(task.keywords),
     markdownOutputMode: normalizeMarkdownOutputMode(task.markdownOutputMode),
+    cleaningLevel: normalizeCleaningLevel(task.cleaningLevel),
+    keepRawContent: normalizeBooleanFlag(task.keepRawContent, false),
+    paragraphDedup: normalizeBooleanFlag(task.paragraphDedup, false),
     crawlMode,
     includeCollegePages: normalizeIncludeCollegePages(task.includeCollegePages, crawlMode),
     collegeUrls: normalizeCollegeUrls(task.collegeUrls).urls
@@ -660,6 +682,9 @@ function normalizePresetRecord(presetLike) {
     announcementUrls: announcementCombined.urls,
     keywords: parseKeywords(preset.keywords),
     markdownOutputMode: normalizeMarkdownOutputMode(preset.markdownOutputMode),
+    cleaningLevel: normalizeCleaningLevel(preset.cleaningLevel),
+    keepRawContent: normalizeBooleanFlag(preset.keepRawContent, false),
+    paragraphDedup: normalizeBooleanFlag(preset.paragraphDedup, false),
     crawlMode,
     includeCollegePages: normalizeIncludeCollegePages(preset.includeCollegePages, crawlMode),
     collegeUrls: normalizeCollegeUrls(preset.collegeUrls).urls,
@@ -2857,24 +2882,93 @@ function normalizeText(text) {
     .trim();
 }
 
-function cleanExtractedContent(text) {
+function cleanExtractedContent(text, options = {}) {
   const source = normalizeText(text);
   if (!source) return '';
+  const level = normalizeCleaningLevel(options.level);
+  const paragraphDedup = normalizeBooleanFlag(options.paragraphDedup, level === 'strict');
   const lines = source
     .split('\n')
     .map((line) => normalizeText(line))
     .filter(Boolean);
   const output = [];
   const seen = new Set();
+  const noiseLineRe = /^(首页|上一条|下一条|返回|打印|关闭|附件下载|责任编辑|当前位置|浏览次数|点击次数|发布时间|发布者|作者)$/;
+  const minLength = level === 'loose' ? 1 : level === 'strict' ? 3 : 2;
+  const noiseMaxLength = level === 'loose' ? 12 : level === 'strict' ? 30 : 24;
   for (const line of lines) {
-    if (line.length < 2) continue;
-    if (/^(首页|上一条|下一条|返回|打印|关闭|附件下载|责任编辑|当前位置)/.test(line) && line.length <= 20) continue;
+    if (line.length < minLength) continue;
+    if (level !== 'loose' && noiseLineRe.test(line) && line.length <= noiseMaxLength) continue;
     const key = line.replace(/\s+/g, '').toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (paragraphDedup && seen.has(key)) continue;
+    if (paragraphDedup) seen.add(key);
     output.push(line);
   }
-  return output.join('\n\n');
+  return output.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function isMarkdownStructuralLine(line) {
+  const text = String(line || '').trim();
+  if (!text) return false;
+  return (
+    /^#{1,6}\s/.test(text) ||
+    /^[-*+]\s/.test(text) ||
+    /^\d+\.\s/.test(text) ||
+    /^>\s?/.test(text) ||
+    /^```/.test(text) ||
+    /^\|/.test(text) ||
+    /^-{3,}$/.test(text) ||
+    /^\[\S.*\]\(https?:\/\/.+\)$/.test(text)
+  );
+}
+
+function flushMarkdownPlainBlock(outputLines, plainBlockLines, cleaningLevel) {
+  if (!plainBlockLines.length) return;
+  const merged = plainBlockLines.join('\n');
+  plainBlockLines.length = 0;
+  const cleaned = cleanExtractedContent(merged, {
+    level: cleaningLevel,
+    paragraphDedup: cleaningLevel === 'strict'
+  });
+  if (!cleaned) return;
+  const parts = cleaned
+    .split('\n\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  parts.forEach((part, idx) => {
+    outputLines.push(part);
+    if (idx < parts.length - 1) {
+      outputLines.push('');
+    }
+  });
+}
+
+function cleanMarkdownDocumentContent(markdownText, cleaningLevel = 'standard') {
+  const level = normalizeCleaningLevel(cleaningLevel);
+  const lines = String(markdownText || '').replace(/\r/g, '').split('\n');
+  const output = [];
+  const plainBlock = [];
+  for (const rawLine of lines) {
+    const line = String(rawLine || '').replace(/[ \t]+$/g, '');
+    if (!line.trim()) {
+      flushMarkdownPlainBlock(output, plainBlock, level);
+      if (output.length && output[output.length - 1] !== '') {
+        output.push('');
+      }
+      continue;
+    }
+    if (isMarkdownStructuralLine(line)) {
+      flushMarkdownPlainBlock(output, plainBlock, level);
+      output.push(line);
+      continue;
+    }
+    plainBlock.push(line);
+  }
+  flushMarkdownPlainBlock(output, plainBlock, level);
+  while (output.length && !String(output[output.length - 1]).trim()) {
+    output.pop();
+  }
+  return output.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function escapeRegExp(text) {
@@ -4538,6 +4632,48 @@ app.post('/api/files/delete-many', async (req, res) => {
     return res.status(404).json({ error: '未找到可删除的 Markdown 文件' });
   }
   res.json({ ok: true, deleted, missing });
+});
+
+app.post('/api/files/clean-many', async (req, res) => {
+  const names = Array.isArray((req.body || {}).names)
+    ? req.body.names.map((x) => path.basename(String(x || '').trim())).filter((x) => x && x.endsWith('.md'))
+    : [];
+  const uniqueNames = Array.from(new Set(names));
+  const cleaningLevel = normalizeCleaningLevel((req.body || {}).cleaningLevel);
+  if (!uniqueNames.length) {
+    return res.status(400).json({ error: '请先选择要清洗的 Markdown 文件' });
+  }
+
+  const created = [];
+  const missing = [];
+  const stamp = nowFilenameStamp();
+
+  for (let index = 0; index < uniqueNames.length; index += 1) {
+    const fileName = uniqueNames[index];
+    const fullPath = path.join(OUTPUT_DIR, fileName);
+    if (!fs.existsSync(fullPath)) {
+      missing.push(fileName);
+      continue;
+    }
+    const raw = await fsp.readFile(fullPath, 'utf8');
+    const cleaned = cleanMarkdownDocumentContent(raw, cleaningLevel) || normalizeText(raw);
+    const baseName = path.basename(fileName, '.md');
+    const outName = `${sanitizeFilename(baseName)}_clean_${cleaningLevel}_${stamp}_${String(index + 1).padStart(2, '0')}.md`;
+    const outPath = path.join(OUTPUT_DIR, outName);
+    await fsp.writeFile(outPath, cleaned, 'utf8');
+    created.push(outName);
+  }
+
+  if (!created.length) {
+    return res.status(404).json({ error: '未找到可清洗的 Markdown 文件' });
+  }
+  return res.json({
+    ok: true,
+    cleaningLevel,
+    created: created.length,
+    fileNames: created,
+    missing
+  });
 });
 
 app.get('/api/files/:name/content', async (req, res) => {

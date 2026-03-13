@@ -419,6 +419,15 @@
         <div class="actions" id="file-actions">
           <button type="button" id="file-select-all" class="muted">全选</button>
           <button type="button" id="file-invert">反选</button>
+          <label class="compact-select">
+            <span>清洗级别</span>
+            <select id="file-cleaning-level">
+              <option value="loose">轻度清洗</option>
+              <option value="standard" selected>正常清洗</option>
+              <option value="strict">严格清洗</option>
+            </select>
+          </label>
+          <button type="button" id="file-clean-selected" class="muted">清洗选中</button>
           <button type="button" id="file-delete-selected" class="danger">删除选中</button>
           <button type="button" id="file-delete-all" class="danger">清空全部</button>
         </div>
