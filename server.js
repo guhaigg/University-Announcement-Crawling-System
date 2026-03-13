@@ -476,6 +476,7 @@ function normalizePresetRecord(presetLike) {
     ...preset,
     id: String(preset.id || '').trim() || `preset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     schoolName: String(preset.schoolName || '').trim() || '未命名院校',
+    collegeName: String(preset.collegeName || '').trim(),
     homepageUrl: String(preset.homepageUrl || '').trim(),
     announcementUrl: announcementCombined.urls[0] || '',
     announcementUrls: announcementCombined.urls,
@@ -503,16 +504,7 @@ function normalizeQuickRetestSchoolRecord(recordLike) {
 
 function buildPresetDedupKey(presetLike) {
   const preset = normalizePresetRecord(presetLike);
-  const announcementKey = (preset.announcementUrls || []).map((x) => normalizeUrlForKey(x)).sort().join('|');
-  const collegeKey = preset.collegeUrls.map((x) => normalizeUrlForKey(x)).sort().join('|');
-  return [
-    normalizeUrlForKey(preset.homepageUrl),
-    announcementKey || normalizeUrlForKey(preset.announcementUrl),
-    preset.crawlMode,
-    preset.markdownOutputMode,
-    preset.includeCollegePages ? '1' : '0',
-    collegeKey
-  ].join('::');
+  return normalizeMatchText(preset.schoolName || '');
 }
 
 function buildQuickRetestSchoolDedupKey(recordLike) {
@@ -558,19 +550,10 @@ function mergeQuickSchoolRecords(currentList, incomingList, limit = 10) {
 }
 
 function decorateManualPresets(presets) {
-  const totalByName = new Map();
-  for (const preset of presets) {
-    const name = String(preset.schoolName || '未命名院校');
-    totalByName.set(name, (totalByName.get(name) || 0) + 1);
-  }
-
-  const indexByName = new Map();
   return presets.map((preset) => {
     const name = String(preset.schoolName || '未命名院校');
-    const idx = indexByName.get(name) || 0;
-    indexByName.set(name, idx + 1);
-    const duplicated = (totalByName.get(name) || 0) > 1;
-    const displayName = duplicated && idx > 0 ? `${name}-${idx}` : name;
+    const collegeName = String(preset.collegeName || '').trim();
+    const displayName = collegeName ? `${name} / ${collegeName}` : name;
     return { ...preset, displayName };
   });
 }
@@ -2878,6 +2861,7 @@ function buildManualPreset(taskLike) {
   return {
     id: `preset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     schoolName: schoolName || '未命名院校',
+    collegeName: String(taskLike.collegeName || '').trim(),
     homepageUrl,
     announcementUrl,
     announcementUrls,
