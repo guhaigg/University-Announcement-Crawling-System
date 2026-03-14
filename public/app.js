@@ -884,6 +884,24 @@ function buildAdjustmentMajorShardWarning(summaryLike) {
   return `告警：检测到深层分页限制，已自动切换至省份级矩阵扫描（触发专业 ${majorCount} 个，扫描省份 ${provinceCount} 个，补充院校 ${addedSchools} 所）。`;
 }
 
+function formatAdjustmentMajorDistributionBase(summaryLike) {
+  const summary = summaryLike || {};
+  const base = summary.distributionSchoolBase;
+  if (base === null || base === undefined || Number(base) <= 0) {
+    const reason = String(summary.distributionSchoolBaseReason || '').trim();
+    return `暂不可用${reason ? `（${reason}）` : ''}`;
+  }
+  return `${Number(base)} 所`;
+}
+
+function formatAdjustmentMajorPrimaryBase(summaryLike) {
+  const summary = summaryLike || {};
+  const base = Number(summary.primaryMajorSchoolBase || 0);
+  const name = String(summary.primaryMajorZymc || summary.primaryMajorZydm || '').trim();
+  if (!name) return `${base} 所`;
+  return `${base} 所（${name}）`;
+}
+
 function clearAdjustmentMajorTestSchoolPicker() {
   adjustmentMajorTestSchoolCandidates = [];
   adjustmentMajorTestSelectedSchoolKeys = new Set();
@@ -907,9 +925,10 @@ function renderAdjustmentMajorTestSchoolPicker() {
   const selectedCount = adjustmentMajorTestSelectedSchoolKeys.size;
   const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
   const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || adjustmentMajorTestSchoolCandidates.length || 0);
+  const distributionBaseText = formatAdjustmentMajorDistributionBase(adjustmentMajorTestPreviewMeta);
   const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
   adjustmentMajorTestSchoolPickerSummary.textContent =
-    `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，白名单补强 ${priorityCount} 所），当前勾选 ${selectedCount} 所。` +
+    `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，专业点分布基数 ${distributionBaseText}，白名单补强 ${priorityCount} 所），当前勾选 ${selectedCount} 所。` +
     (shardWarning ? ` ${shardWarning}` : '');
   adjustmentMajorTestSchoolPickerList.innerHTML = adjustmentMajorTestSchoolCandidates
     .map((school) => {
@@ -946,9 +965,10 @@ function syncAdjustmentMajorTestSelectedSchools(checked, key) {
   if (adjustmentMajorTestSchoolPickerSummary) {
     const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
     const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || adjustmentMajorTestSchoolCandidates.length || 0);
+    const distributionBaseText = formatAdjustmentMajorDistributionBase(adjustmentMajorTestPreviewMeta);
     const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
     adjustmentMajorTestSchoolPickerSummary.textContent =
-      `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，白名单补强 ${priorityCount} 所），当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。` +
+      `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，专业点分布基数 ${distributionBaseText}，白名单补强 ${priorityCount} 所），当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。` +
       (shardWarning ? ` ${shardWarning}` : '');
   }
 }
@@ -1138,9 +1158,11 @@ function refreshAdjustmentMajorTestSummary() {
   const catalogSchoolBase = Number(summary.catalogSchoolBase || summary.schoolsFromCatalog || 0);
   const candidatePool = Number(summary.schoolsFromCatalog || 0);
   const parsedSchools = Number(summary.schoolsParsed || summary.schoolsScanned || 0);
+  const distributionBaseText = formatAdjustmentMajorDistributionBase(summary);
+  const primaryBaseText = formatAdjustmentMajorPrimaryBase(summary);
   const shardWarning = buildAdjustmentMajorShardWarning(summary);
   adjustmentMajorTestSummary.textContent =
-    `开设院校基数 ${catalogSchoolBase} 所，候选院校池 ${candidatePool} 所，执行抓取 ${parsedSchools} 所，命中公告院校 ${summary.schoolsWithResult || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
+    `开设院校基数 ${catalogSchoolBase} 所，专业点分布基数 ${distributionBaseText}，主匹配专业基数 ${primaryBaseText}，候选院校池 ${candidatePool} 所，执行抓取 ${parsedSchools} 所，命中公告院校 ${summary.schoolsWithResult || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
     `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。` +
     `历史辅助：院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条；` +
     `白名单补强：${summary.prioritySchoolSeeds || 0} 所（预置 ${summary.builtinPriorityRules || 0} / 自定义 ${summary.userPrioritySchools || 0}）。`;
