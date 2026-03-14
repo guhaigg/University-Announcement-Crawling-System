@@ -132,9 +132,19 @@ const adjustmentMajorTestMaxSchools = document.getElementById('adjustment-major-
 const adjustmentMajorTestMaxNotices = document.getElementById('adjustment-major-test-max-notices');
 const adjustmentMajorTestMaxMajors = document.getElementById('adjustment-major-test-max-majors');
 const adjustmentMajorTestRefreshBeforeRun = document.getElementById('adjustment-major-test-refresh-before-run');
+const adjustmentMajorTestUsePriority = document.getElementById('adjustment-major-test-use-priority');
 const adjustmentMajorTestMatchBtn = document.getElementById('adjustment-major-test-match-btn');
 const adjustmentMajorTestRunBtn = document.getElementById('adjustment-major-test-run-btn');
 const adjustmentMajorTestExportBtn = document.getElementById('adjustment-major-test-export-btn');
+const adjustmentPrioritySchoolName = document.getElementById('adjustmentPrioritySchoolName');
+const adjustmentPriorityCollegeName = document.getElementById('adjustmentPriorityCollegeName');
+const adjustmentPriorityIncludeCollegePages = document.getElementById('adjustmentPriorityIncludeCollegePages');
+const adjustmentPriorityAddBtn = document.getElementById('adjustment-priority-add-btn');
+const adjustmentPriorityCancelBtn = document.getElementById('adjustment-priority-cancel-btn');
+const adjustmentPrioritySyncBtn = document.getElementById('adjustment-priority-sync-btn');
+const adjustmentPriorityBootstrapBtn = document.getElementById('adjustment-priority-bootstrap-btn');
+const adjustmentPriorityEditorTip = document.getElementById('adjustment-priority-editor-tip');
+const adjustmentPriorityList = document.getElementById('adjustment-priority-list');
 const adjustmentMajorTestSchoolPicker = document.getElementById('adjustment-major-test-school-picker');
 const adjustmentMajorTestSchoolPickerSummary = document.getElementById('adjustment-major-test-school-picker-summary');
 const adjustmentMajorTestSchoolPickerList = document.getElementById('adjustment-major-test-school-picker-list');
@@ -199,6 +209,9 @@ let adjustmentMajorTestSchoolCandidates = [];
 let adjustmentMajorTestSelectedSchoolKeys = new Set();
 let adjustmentMajorTestPreviewSignature = '';
 let adjustmentMajorCacheState = null;
+let adjustmentPrioritySchools = [];
+let adjustmentPriorityBuiltinRuleCount = 50;
+let editingAdjustmentPriorityId = '';
 let adjustmentCleanQuickSchools = [];
 let newsQuickSchools = [];
 let adjustmentQuickSchools = [];
@@ -820,6 +833,22 @@ function buildAdjustmentMajorSchoolCandidateKey(school) {
   return normalizeFilterText(school?.schoolName || school?.dwmc || '');
 }
 
+function focusAdjustmentMajorPickerSchoolByName(schoolName) {
+  const target = normalizeFilterText(schoolName || '');
+  if (!target || !adjustmentMajorTestSchoolCandidates.length) return false;
+  const candidate = adjustmentMajorTestSchoolCandidates.find((item) => {
+    const nameKey = normalizeFilterText(item?.schoolName || item?.dwmc || '');
+    if (!nameKey) return false;
+    return nameKey === target || nameKey.includes(target) || target.includes(nameKey);
+  });
+  if (!candidate) return false;
+  const key = buildAdjustmentMajorSchoolCandidateKey(candidate);
+  if (!key) return false;
+  adjustmentMajorTestSelectedSchoolKeys = new Set([key]);
+  renderAdjustmentMajorTestSchoolPicker();
+  return true;
+}
+
 function collectAdjustmentMajorTestPayload() {
   return {
     majorKeyword: String(adjustmentMajorTestMajor?.value || '').trim(),
@@ -828,7 +857,8 @@ function collectAdjustmentMajorTestPayload() {
     maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 20),
     maxNoticesPerSchool: Number(adjustmentMajorTestMaxNotices?.value || 14),
     maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 8),
-    refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked)
+    refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked),
+    usePrioritySchools: adjustmentMajorTestUsePriority ? Boolean(adjustmentMajorTestUsePriority.checked) : true
   };
 }
 
@@ -839,7 +869,8 @@ function buildAdjustmentMajorTestPreviewSignature(payload) {
     keywords: String(payload?.keywords || '').trim(),
     maxSchools: Number(payload?.maxSchools || 0),
     maxMajorCandidates: Number(payload?.maxMajorCandidates || 0),
-    refreshCatalog: Boolean(payload?.refreshCatalog)
+    refreshCatalog: Boolean(payload?.refreshCatalog),
+    usePrioritySchools: Boolean(payload?.usePrioritySchools)
   });
 }
 
@@ -863,7 +894,8 @@ function renderAdjustmentMajorTestSchoolPicker() {
 
   adjustmentMajorTestSchoolPicker.classList.remove('hidden');
   const selectedCount = adjustmentMajorTestSelectedSchoolKeys.size;
-  adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校，当前勾选 ${selectedCount} 所。`;
+  const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
+  adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校（白名单补强 ${priorityCount} 所），当前勾选 ${selectedCount} 所。`;
   adjustmentMajorTestSchoolPickerList.innerHTML = adjustmentMajorTestSchoolCandidates
     .map((school) => {
       const key = buildAdjustmentMajorSchoolCandidateKey(school);
@@ -873,6 +905,7 @@ function renderAdjustmentMajorTestSchoolPicker() {
         .filter(Boolean)
         .slice(0, 3)
         .join(' / ');
+      const sourceLabel = school.priority ? '重点白名单' : school.source === 'cache' ? '历史缓存' : '';
       return `<li>
         <label>
           <input type="checkbox" data-major-school-key="${escapeHtml(key)}" ${checked} />
@@ -880,9 +913,12 @@ function renderAdjustmentMajorTestSchoolPicker() {
             <span class="scan-title">${escapeHtml(school.schoolName || school.dwmc || '未命名院校')}</span>
             ${school.ssmc ? `<span class="scan-date">地区：${escapeHtml(school.ssmc)}</span>` : ''}
             ${school.dwdm ? `<span class="scan-date">代码：${escapeHtml(school.dwdm)}</span>` : ''}
+            ${school.collegeName ? `<span class="scan-date">学院展示：${escapeHtml(school.collegeName)}</span>` : ''}
             ${majorHints ? `<span class="scan-date">匹配专业：${escapeHtml(majorHints)}</span>` : ''}
+            ${sourceLabel ? `<span class="scan-date">${escapeHtml(sourceLabel)}</span>` : ''}
           </div>
         </label>
+        <button type="button" data-action="run-major-school-only" data-major-school-key="${escapeHtml(key)}" class="muted">仅抓该校</button>
       </li>`;
     })
     .join('');
@@ -893,7 +929,8 @@ function syncAdjustmentMajorTestSelectedSchools(checked, key) {
   if (checked) adjustmentMajorTestSelectedSchoolKeys.add(key);
   else adjustmentMajorTestSelectedSchoolKeys.delete(key);
   if (adjustmentMajorTestSchoolPickerSummary) {
-    adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校，当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。`;
+    const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
+    adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校（白名单补强 ${priorityCount} 所），当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。`;
   }
 }
 
@@ -1080,7 +1117,8 @@ function refreshAdjustmentMajorTestSummary() {
   adjustmentMajorTestSummary.textContent =
     `匹配院校 ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
     `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。` +
-    `历史辅助：院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条。`;
+    `历史辅助：院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条；` +
+    `白名单补强：${summary.prioritySchoolSeeds || 0} 所（预置 ${summary.builtinPriorityRules || 0} / 自定义 ${summary.userPrioritySchools || 0}）。`;
   const majorText = majorCandidates.length
     ? majorCandidates
         .slice(0, 8)
@@ -1329,6 +1367,65 @@ async function loadAdjustmentQuickSchools() {
   const data = await api('/api/adjustment-quick-schools');
   adjustmentQuickSchools = Array.isArray(data.schools) ? data.schools : [];
   renderAdjustmentQuickSchools();
+}
+
+function renderAdjustmentPrioritySchools() {
+  if (!adjustmentPriorityList) return;
+  if (!adjustmentPrioritySchools.length) {
+    adjustmentPriorityList.innerHTML = '<li class="empty">暂无重点白名单院校（最多 50 所）</li>';
+    return;
+  }
+  adjustmentPriorityList.innerHTML = adjustmentPrioritySchools
+    .map((item) => {
+      const label = `${item.schoolName || '未命名院校'}${item.collegeName ? ` / ${item.collegeName}` : ''}`;
+      const editing = editingAdjustmentPriorityId && editingAdjustmentPriorityId === item.id;
+      const sourceTag = String(item.sourceTag || '').trim() === 'builtin_priority_rule' ? '预置规则' : '自定义';
+      return `<li class="${editing ? 'editing' : ''}">
+        <strong>${escapeHtml(label)}</strong>
+        <span class="scan-date">${escapeHtml(sourceTag)}</span>
+        ${editing ? '<span class="quick-editing-tag">编辑中</span>' : ''}
+        <button type="button" data-action="focus-adjustment-priority" data-id="${item.id}">选中</button>
+        <button type="button" data-action="edit-adjustment-priority" data-id="${item.id}" class="muted">修改</button>
+        <button type="button" data-action="delete-adjustment-priority" data-id="${item.id}" class="danger">删除</button>
+      </li>`;
+    })
+    .join('');
+}
+
+async function loadAdjustmentPrioritySchools() {
+  const data = await api('/api/adjustment-priority-schools');
+  adjustmentPrioritySchools = Array.isArray(data.schools) ? data.schools : [];
+  adjustmentPriorityBuiltinRuleCount = Math.max(0, Number(data.builtinRuleCount || adjustmentPriorityBuiltinRuleCount || 50));
+  renderAdjustmentPrioritySchools();
+  if (!editingAdjustmentPriorityId && adjustmentPriorityEditorTip) {
+    adjustmentPriorityEditorTip.textContent = `当前为新增模式（预置规则库 ${adjustmentPriorityBuiltinRuleCount} 所）。`;
+  }
+}
+
+function resetAdjustmentPriorityEditor() {
+  editingAdjustmentPriorityId = '';
+  if (adjustmentPrioritySchoolName) adjustmentPrioritySchoolName.value = '';
+  if (adjustmentPriorityCollegeName) adjustmentPriorityCollegeName.value = '';
+  if (adjustmentPriorityIncludeCollegePages) adjustmentPriorityIncludeCollegePages.checked = true;
+  if (adjustmentPriorityAddBtn) adjustmentPriorityAddBtn.textContent = '加入白名单';
+  if (adjustmentPriorityEditorTip) {
+    adjustmentPriorityEditorTip.textContent = `当前为新增模式（预置规则库 ${adjustmentPriorityBuiltinRuleCount} 所）。`;
+  }
+  renderAdjustmentPrioritySchools();
+}
+
+function startAdjustmentPriorityEdit(item) {
+  if (!item) return;
+  editingAdjustmentPriorityId = item.id;
+  if (adjustmentPrioritySchoolName) adjustmentPrioritySchoolName.value = item.schoolName || '';
+  if (adjustmentPriorityCollegeName) adjustmentPriorityCollegeName.value = item.collegeName || '';
+  if (adjustmentPriorityIncludeCollegePages) adjustmentPriorityIncludeCollegePages.checked = item.includeCollegePages !== false;
+  if (adjustmentPriorityAddBtn) adjustmentPriorityAddBtn.textContent = '保存修改';
+  if (adjustmentPriorityEditorTip) {
+    const label = `${item.schoolName || '未命名院校'}${item.collegeName ? ` / ${item.collegeName}` : ''}`;
+    adjustmentPriorityEditorTip.textContent = `当前正在修改：${label}`;
+  }
+  renderAdjustmentPrioritySchools();
 }
 
 async function syncQuickSchools(sourceType) {
@@ -2830,6 +2927,118 @@ if (adjustmentQuickList) {
   });
 }
 
+if (adjustmentPriorityAddBtn) {
+  adjustmentPriorityAddBtn.addEventListener('click', async () => {
+    const schoolName = String(adjustmentPrioritySchoolName?.value || '').trim();
+    const collegeName = String(adjustmentPriorityCollegeName?.value || '').trim();
+    const isEditing = Boolean(editingAdjustmentPriorityId);
+    if (!schoolName) {
+      showToast('请先填写院校名称', true);
+      return;
+    }
+    try {
+      setButtonBusy(adjustmentPriorityAddBtn, true, isEditing ? '保存中...' : '添加中...');
+      await api('/api/adjustment-priority-schools', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: editingAdjustmentPriorityId || undefined,
+          schoolName,
+          collegeName,
+          includeCollegePages: Boolean(adjustmentPriorityIncludeCollegePages?.checked)
+        })
+      });
+      await loadAdjustmentPrioritySchools();
+      resetAdjustmentPriorityEditor();
+      showToast(isEditing ? '重点白名单已更新' : '已加入重点白名单');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentPriorityAddBtn, false);
+    }
+  });
+}
+
+if (adjustmentPriorityCancelBtn) {
+  adjustmentPriorityCancelBtn.addEventListener('click', () => {
+    if (!editingAdjustmentPriorityId && !adjustmentPrioritySchoolName?.value?.trim() && !adjustmentPriorityCollegeName?.value?.trim()) return;
+    resetAdjustmentPriorityEditor();
+  });
+}
+
+if (adjustmentPrioritySyncBtn) {
+  adjustmentPrioritySyncBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(adjustmentPrioritySyncBtn, true, '同步中...');
+      const data = await api('/api/adjustment-priority-schools/sync', { method: 'POST' });
+      await loadAdjustmentPrioritySchools();
+      const synced = Number(data.syncedCount || 0);
+      showToast(synced > 0 ? `已同步 ${synced} 所院校到重点白名单` : '重点白名单已是最新');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentPrioritySyncBtn, false);
+    }
+  });
+}
+
+if (adjustmentPriorityBootstrapBtn) {
+  adjustmentPriorityBootstrapBtn.addEventListener('click', async () => {
+    try {
+      setButtonBusy(adjustmentPriorityBootstrapBtn, true, '加载中...');
+      const data = await api('/api/adjustment-priority-schools/bootstrap', {
+        method: 'POST',
+        body: JSON.stringify({ replaceAll: false })
+      });
+      await loadAdjustmentPrioritySchools();
+      showToast(`已加载预置规则，当前白名单 ${data.total || 0} 所`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentPriorityBootstrapBtn, false);
+    }
+  });
+}
+
+if (adjustmentPriorityList) {
+  adjustmentPriorityList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const item = adjustmentPrioritySchools.find((x) => x.id === btn.dataset.id);
+    if (!item) return;
+    const action = btn.dataset.action;
+    if (action === 'edit-adjustment-priority') {
+      startAdjustmentPriorityEdit(item);
+      return;
+    }
+    if (action === 'focus-adjustment-priority') {
+      if (!adjustmentMajorTestSchoolCandidates.length) {
+        showToast('请先点击“先匹配院校”生成候选列表', true);
+        return;
+      }
+      const focused = focusAdjustmentMajorPickerSchoolByName(item.schoolName || '');
+      if (!focused) {
+        showToast('当前候选列表中未找到该院校，请先重新匹配院校', true);
+        return;
+      }
+      showToast('已在候选院校中选中该校');
+      return;
+    }
+    if (action === 'delete-adjustment-priority') {
+      try {
+        setButtonBusy(btn, true, '删除中...');
+        await api(`/api/adjustment-priority-schools/${item.id}`, { method: 'DELETE' });
+        await loadAdjustmentPrioritySchools();
+        if (editingAdjustmentPriorityId === item.id) resetAdjustmentPriorityEditor();
+        showToast('已删除重点白名单院校');
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        setButtonBusy(btn, false);
+      }
+    }
+  });
+}
+
 if (adjustmentCleanQuickAddBtn) {
   adjustmentCleanQuickAddBtn.addEventListener('click', async () => {
     const schoolName = String(adjustmentCleanQuickSchoolName?.value || '').trim();
@@ -3200,6 +3409,16 @@ if (adjustmentMajorTestSchoolPickerList) {
     const key = String(input.dataset.majorSchoolKey || '').trim();
     syncAdjustmentMajorTestSelectedSchools(Boolean(input.checked), key);
   });
+  adjustmentMajorTestSchoolPickerList.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action="run-major-school-only"]');
+    if (!btn) return;
+    const key = String(btn.dataset.majorSchoolKey || '').trim();
+    if (!key) return;
+    adjustmentMajorTestSelectedSchoolKeys = new Set([key]);
+    renderAdjustmentMajorTestSchoolPicker();
+    if (!adjustmentMajorTestForm) return;
+    adjustmentMajorTestForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  });
 }
 
 if (adjustmentMajorTestPickAllBtn) {
@@ -3230,7 +3449,8 @@ if (adjustmentMajorTestPickInvertBtn) {
   adjustmentMajorTestKeywords,
   adjustmentMajorTestMaxSchools,
   adjustmentMajorTestMaxMajors,
-  adjustmentMajorTestRefreshBeforeRun
+  adjustmentMajorTestRefreshBeforeRun,
+  adjustmentMajorTestUsePriority
 ].forEach((el) => {
   if (!el) return;
   const eventName = el.tagName === 'INPUT' && el.type === 'checkbox' ? 'change' : 'input';
@@ -3607,6 +3827,7 @@ if (loginForm) {
         loadManualPresets(),
         loadNewsQuickSchools(),
         loadAdjustmentQuickSchools(),
+        loadAdjustmentPrioritySchools(),
         loadAdjustmentCleanQuickSchools(),
         loadAdjustmentMajorTestCatalogStatus().catch(() => {}),
         loadAdjustmentMajorTestCache().catch(() => {})
@@ -4100,6 +4321,7 @@ async function init() {
     loadManualPresets(),
     loadNewsQuickSchools(),
     loadAdjustmentQuickSchools(),
+    loadAdjustmentPrioritySchools(),
     loadAdjustmentCleanQuickSchools(),
     loadAdjustmentMajorTestCatalogStatus().catch(() => {}),
     loadAdjustmentMajorTestCache().catch(() => {})

@@ -483,6 +483,10 @@
             <input id="adjustment-major-test-refresh-before-run" type="checkbox" />
             查询前强制刷新本地库
           </label>
+          <label class="check-row">
+            <input id="adjustment-major-test-use-priority" type="checkbox" checked />
+            启用“50 所重点院校”白名单补强
+          </label>
           <div class="actions inline-actions">
             <button type="button" id="adjustment-major-test-refresh-btn" class="muted">刷新研招网本地库</button>
             <button type="button" id="adjustment-major-test-match-btn" class="muted">先匹配院校</button>
@@ -492,6 +496,33 @@
         </form>
 
         <p class="subtitle quick-editor-tip" id="adjustment-major-test-status">本地库状态：读取中...</p>
+        <div id="adjustment-priority-panel" class="verify-panel">
+          <h3>重点院校白名单（最多 50 所）</h3>
+          <p class="subtitle">用于专业测试阶段补强院校覆盖；可同步调剂智能导航固定院校，也可一键加载预置 50 所适配库。</p>
+          <div class="form-grid">
+            <label>
+              院校名称
+              <input id="adjustmentPrioritySchoolName" placeholder="例如：华中师范大学" />
+            </label>
+            <label>
+              学院名称（仅展示）
+              <input id="adjustmentPriorityCollegeName" placeholder="例如：外国语学院（可选）" />
+            </label>
+            <label class="check-row">
+              <input id="adjustmentPriorityIncludeCollegePages" type="checkbox" checked />
+              抓取时包含学院层级页面
+            </label>
+            <div class="actions inline-actions">
+              <button type="button" id="adjustment-priority-add-btn">加入白名单</button>
+              <button type="button" id="adjustment-priority-cancel-btn" class="muted">取消修改</button>
+              <button type="button" id="adjustment-priority-sync-btn" class="muted">同步自调剂导航</button>
+              <button type="button" id="adjustment-priority-bootstrap-btn" class="muted">加载预置 50 所</button>
+            </div>
+          </div>
+          <p class="subtitle quick-editor-tip" id="adjustment-priority-editor-tip">当前为新增模式。</p>
+          <ul id="adjustment-priority-list"></ul>
+        </div>
+
         <div id="adjustment-major-test-school-picker" class="verify-panel hidden">
           <p id="adjustment-major-test-school-picker-summary" class="subtitle"></p>
           <div class="actions inline-actions">

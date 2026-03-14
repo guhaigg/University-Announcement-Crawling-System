@@ -131,6 +131,59 @@ const YANZHAO_PROVINCE_LIST = [
   { code: '65', name: '新疆', zone: '二区' }
 ];
 
+const BUILTIN_PRIORITY_SCHOOL_RULES = [
+  { schoolName: '清华大学', aliases: ['清华'], homepageUrl: 'https://www.tsinghua.edu.cn/' },
+  { schoolName: '北京大学', aliases: ['北大'], homepageUrl: 'https://www.pku.edu.cn/' },
+  { schoolName: '中国人民大学', aliases: ['人大'], homepageUrl: 'https://www.ruc.edu.cn/' },
+  { schoolName: '北京航空航天大学', aliases: ['北航'], homepageUrl: 'https://www.buaa.edu.cn/' },
+  { schoolName: '北京理工大学', aliases: ['北理', '北理工'], homepageUrl: 'https://www.bit.edu.cn/' },
+  { schoolName: '北京师范大学', aliases: ['北师大'], homepageUrl: 'https://www.bnu.edu.cn/' },
+  { schoolName: '中国农业大学', aliases: ['中农大'], homepageUrl: 'https://www.cau.edu.cn/' },
+  { schoolName: '北京科技大学', aliases: ['北科大'], homepageUrl: 'https://www.ustb.edu.cn/' },
+  { schoolName: '北京交通大学', aliases: ['北交'], homepageUrl: 'https://www.bjtu.edu.cn/' },
+  { schoolName: '北京邮电大学', aliases: ['北邮'], homepageUrl: 'https://www.bupt.edu.cn/' },
+  { schoolName: '中国政法大学', aliases: ['法大'], homepageUrl: 'https://www.cupl.edu.cn/' },
+  { schoolName: '中央财经大学', aliases: ['央财'], homepageUrl: 'https://www.cufe.edu.cn/' },
+  { schoolName: '对外经济贸易大学', aliases: ['贸大'], homepageUrl: 'https://www.uibe.edu.cn/' },
+  { schoolName: '中国传媒大学', aliases: ['中传'], homepageUrl: 'https://www.cuc.edu.cn/' },
+  { schoolName: '南开大学', aliases: ['南开'], homepageUrl: 'https://www.nankai.edu.cn/' },
+  { schoolName: '天津大学', aliases: ['天大'], homepageUrl: 'https://www.tju.edu.cn/' },
+  { schoolName: '复旦大学', aliases: ['复旦'], homepageUrl: 'https://www.fudan.edu.cn/' },
+  { schoolName: '上海交通大学', aliases: ['上交', '上交大'], homepageUrl: 'https://www.sjtu.edu.cn/' },
+  { schoolName: '同济大学', aliases: ['同济'], homepageUrl: 'https://www.tongji.edu.cn/' },
+  { schoolName: '华东师范大学', aliases: ['华东师大'], homepageUrl: 'https://www.ecnu.edu.cn/' },
+  { schoolName: '华东理工大学', aliases: ['华理'], homepageUrl: 'https://www.ecust.edu.cn/' },
+  { schoolName: '上海财经大学', aliases: ['上财'], homepageUrl: 'https://www.sufe.edu.cn/' },
+  { schoolName: '南京大学', aliases: ['南大'], homepageUrl: 'https://www.nju.edu.cn/' },
+  { schoolName: '东南大学', aliases: ['东大'], homepageUrl: 'https://www.seu.edu.cn/' },
+  { schoolName: '浙江大学', aliases: ['浙大'], homepageUrl: 'https://www.zju.edu.cn/' },
+  { schoolName: '中国科学技术大学', aliases: ['中科大'], homepageUrl: 'https://www.ustc.edu.cn/' },
+  { schoolName: '厦门大学', aliases: ['厦大'], homepageUrl: 'https://www.xmu.edu.cn/' },
+  { schoolName: '山东大学', aliases: ['山大'], homepageUrl: 'https://www.sdu.edu.cn/' },
+  { schoolName: '中国海洋大学', aliases: ['海大'], homepageUrl: 'https://www.ouc.edu.cn/' },
+  { schoolName: '武汉大学', aliases: ['武大'], homepageUrl: 'https://www.whu.edu.cn/' },
+  { schoolName: '华中科技大学', aliases: ['华科', '华中科大'], homepageUrl: 'https://www.hust.edu.cn/' },
+  { schoolName: '华中师范大学', aliases: ['华中师大'], homepageUrl: 'https://www.ccnu.edu.cn/' },
+  { schoolName: '中南大学', aliases: ['中南'], homepageUrl: 'https://www.csu.edu.cn/' },
+  { schoolName: '湖南大学', aliases: ['湖大'], homepageUrl: 'https://www.hnu.edu.cn/' },
+  { schoolName: '中山大学', aliases: ['中大'], homepageUrl: 'https://www.sysu.edu.cn/' },
+  { schoolName: '华南理工大学', aliases: ['华工'], homepageUrl: 'https://www.scut.edu.cn/' },
+  { schoolName: '四川大学', aliases: ['川大'], homepageUrl: 'https://www.scu.edu.cn/' },
+  { schoolName: '电子科技大学', aliases: ['电子科大', '成电'], homepageUrl: 'https://www.uestc.edu.cn/' },
+  { schoolName: '重庆大学', aliases: ['重大'], homepageUrl: 'https://www.cqu.edu.cn/' },
+  { schoolName: '西安交通大学', aliases: ['西交', '西交大'], homepageUrl: 'https://www.xjtu.edu.cn/' },
+  { schoolName: '西北工业大学', aliases: ['西工大'], homepageUrl: 'https://www.nwpu.edu.cn/' },
+  { schoolName: '西北农林科技大学', aliases: ['西农'], homepageUrl: 'https://www.nwafu.edu.cn/' },
+  { schoolName: '兰州大学', aliases: ['兰大'], homepageUrl: 'https://www.lzu.edu.cn/' },
+  { schoolName: '吉林大学', aliases: ['吉大'], homepageUrl: 'https://www.jlu.edu.cn/' },
+  { schoolName: '大连理工大学', aliases: ['大工', '大连理工'], homepageUrl: 'https://www.dlut.edu.cn/' },
+  { schoolName: '东北大学', aliases: ['东大沈阳'], homepageUrl: 'https://www.neu.edu.cn/' },
+  { schoolName: '东北师范大学', aliases: ['东北师大'], homepageUrl: 'https://www.nenu.edu.cn/' },
+  { schoolName: '陕西师范大学', aliases: ['陕师大'], homepageUrl: 'https://www.snnu.edu.cn/' },
+  { schoolName: '哈尔滨工业大学', aliases: ['哈工大'], homepageUrl: 'https://www.hit.edu.cn/' },
+  { schoolName: '南方科技大学', aliases: ['南科大'], homepageUrl: 'https://www.sustech.edu.cn/' }
+];
+
 const scheduledJobs = new Map();
 const runningTasks = new Set();
 const sessions = new Map();
@@ -1148,11 +1201,17 @@ function normalizeQuickRetestSchoolRecord(recordLike) {
   const record = recordLike || {};
   const schoolName = String(record.schoolName || '').trim();
   const collegeName = String(record.collegeName || '').trim();
+  const homepageUrl = isValidHttpUrl(record.homepageUrl) ? String(record.homepageUrl).trim() : '';
+  const announcementCombined = combineAnnouncementUrls(record.announcementUrl, record.announcementUrls);
   return {
     id: String(record.id || '').trim() || `quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     schoolName,
     collegeName,
     includeCollegePages: record.includeCollegePages !== false,
+    homepageUrl,
+    announcementUrl: announcementCombined.urls[0] || '',
+    announcementUrls: announcementCombined.urls,
+    sourceTag: String(record.sourceTag || '').trim(),
     savedAt: String(record.savedAt || nowIsoSafe())
   };
 }
@@ -2724,10 +2783,17 @@ async function smartMatchCollegeSite(schoolName, collegeName, schoolHomepageUrl,
 async function smartMatchGraduateBySchoolName(schoolName, options = {}) {
   const includeCollegePages = options.includeCollegePages !== false;
   const collegeName = String(options.collegeName || '').trim();
+  const preferredHomepageUrl = isValidHttpUrl(options.preferredHomepageUrl) ? String(options.preferredHomepageUrl).trim() : '';
+  const preferredAnnouncementUrls = normalizeAnnouncementUrls(options.preferredAnnouncementUrls || []).urls;
   const normalizedName = String(schoolName || '').trim();
   if (!normalizedName) {
     throw new Error('schoolName 不能为空');
   }
+  const priorityRule = resolvePrioritySchoolRuleBySchoolName(normalizedName);
+  const seededHomepageUrl = preferredHomepageUrl || (priorityRule?.homepageUrl || '');
+  const seededAnnouncementUrls = Array.from(
+    new Set([...(Array.isArray(preferredAnnouncementUrls) ? preferredAnnouncementUrls : []), ...((priorityRule && priorityRule.announcementUrls) || [])])
+  ).filter((url) => isValidHttpUrl(url));
 
   const queries = [
     `${normalizedName} 官网`,
@@ -2753,12 +2819,21 @@ async function smartMatchGraduateBySchoolName(schoolName, options = {}) {
   );
   const merged = [];
   const seen = new Set();
+  const pushMerged = (itemLike) => {
+    if (!itemLike || !isValidHttpUrl(itemLike.url)) return;
+    const key = normalizeUrlForKey(itemLike.url);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(itemLike);
+  };
+  pushMerged({
+    title: `${normalizedName} 官网`,
+    text: `${normalizedName} 官网`,
+    url: seededHomepageUrl
+  });
   for (const set of [...bingResultSets, ...sogouResultSets]) {
     for (const item of set) {
-      const key = normalizeUrlForKey(item.url);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      merged.push(item);
+      pushMerged(item);
     }
   }
   if (!merged.length) {
@@ -2766,7 +2841,7 @@ async function smartMatchGraduateBySchoolName(schoolName, options = {}) {
   }
 
   const picked = pickOfficialHomepage(merged, normalizedName);
-  let homepageUrl = picked.homepageUrl;
+  let homepageUrl = seededHomepageUrl || picked.homepageUrl;
   const collegeProfile = await smartMatchCollegeSite(normalizedName, collegeName, homepageUrl, { includeCollegePages });
 
   if (collegeProfile?.matchedHomepageUrl && (!isLikelyOfficialHomepageUrl(homepageUrl) || !isSameDomainFamily(homepageUrl, collegeProfile.matchedHomepageUrl))) {
@@ -2805,6 +2880,20 @@ async function smartMatchGraduateBySchoolName(schoolName, options = {}) {
       announcementMap.set(key, { ...item, source: 'web_search' });
     }
   }
+  seededAnnouncementUrls.forEach((url, idx) => {
+    const key = normalizeUrlForKey(url);
+    if (!key) return;
+    const old = announcementMap.get(key);
+    const seeded = {
+      text: `${normalizedName} 招生公告入口`,
+      url,
+      score: 360 - idx * 8,
+      source: 'priority_seed'
+    };
+    if (!old || (old.score || 0) < seeded.score) {
+      announcementMap.set(key, seeded);
+    }
+  });
 
   const scoredAnnouncementCandidates = Array.from(announcementMap.values())
     .filter((x) => isValidHttpUrl(x.url))
@@ -2877,6 +2966,8 @@ async function smartMatchGraduateBySchoolName(schoolName, options = {}) {
     announcementCandidates,
     collegeCandidates: mergedCollegeCandidates,
     collegeProfile,
+    priorityRule: priorityRule || null,
+    priorityAnnouncementCandidates: seededAnnouncementUrls,
     suggestedAnnouncementUrl: suggestedAnnouncement?.url || '',
     suggestedCollegeUrls,
     includeCollegePages
@@ -3083,6 +3174,9 @@ function buildGraduateNewsPageCandidates(profile) {
   };
 
   push(profile?.suggestedAnnouncementUrl, 'suggested', 280);
+  (Array.isArray(profile?.priorityAnnouncementCandidates) ? profile.priorityAnnouncementCandidates : []).slice(0, 12).forEach((item, idx) =>
+    push({ text: '重点院校白名单入口', url: item }, 'priority_seed', 260 - idx * 8)
+  );
   (profile?.announcementCandidates || []).slice(0, 24).forEach((item) => push(item, 'announcement', 120));
   (profile?.collegeProfile?.announcementCandidates || []).slice(0, 16).forEach((item) => push(item, 'college_announcement', 90));
   (profile?.collegeCandidates || []).slice(0, 18).forEach((item) => push(item, 'college_page', 60));
@@ -3097,12 +3191,19 @@ async function queryGraduateRecentNoticesBySchoolName(options = {}) {
   const schoolName = String(options.schoolName || '').trim();
   const collegeName = String(options.collegeName || '').trim();
   const includeCollegePages = options.includeCollegePages !== false;
+  const preferredHomepageUrl = isValidHttpUrl(options.homepageUrl) ? String(options.homepageUrl).trim() : '';
+  const preferredAnnouncementUrls = normalizeAnnouncementUrls(options.announcementUrls || options.announcementUrl || []).urls;
   const focus = String(options.focus || 'general') === 'retest' ? 'retest' : 'general';
   if (!schoolName) {
     throw new Error('请输入院校名称');
   }
 
-  const profile = await smartMatchGraduateBySchoolName(schoolName, { collegeName, includeCollegePages });
+  const profile = await smartMatchGraduateBySchoolName(schoolName, {
+    collegeName,
+    includeCollegePages,
+    preferredHomepageUrl,
+    preferredAnnouncementUrls
+  });
   const pageCandidates = buildGraduateNewsPageCandidates(profile);
   if (!pageCandidates.length) {
     throw new Error('未匹配到可用研招公告页');
@@ -3250,7 +3351,9 @@ async function queryGraduateRecentNoticesBySchoolName(options = {}) {
       homepageUrl: profile.homepageUrl || '',
       collegeHomepageUrl: profile.collegeProfile?.matchedHomepageUrl || '',
       announcementCandidateCount: Array.isArray(profile.announcementCandidates) ? profile.announcementCandidates.length : 0,
-      collegeCandidateCount: Array.isArray(profile.collegeCandidates) ? profile.collegeCandidates.length : 0
+      collegeCandidateCount: Array.isArray(profile.collegeCandidates) ? profile.collegeCandidates.length : 0,
+      priorityRuleApplied: String(profile.priorityRule?.schoolName || '').trim(),
+      prioritySeedCount: Array.isArray(profile.priorityAnnouncementCandidates) ? profile.priorityAnnouncementCandidates.length : 0
     }
   };
 }
@@ -3521,6 +3624,73 @@ function mergeCookieHeaderValue(baseCookie = '', setCookieHeader = null) {
   return Array.from(map.entries())
     .map(([key, value]) => `${key}=${value}`)
     .join('; ');
+}
+
+function normalizePrioritySchoolRule(ruleLike) {
+  const rule = ruleLike || {};
+  const schoolName = String(rule.schoolName || '').trim();
+  const aliases = Array.isArray(rule.aliases)
+    ? rule.aliases.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 10)
+    : [];
+  const homepageUrl = isValidHttpUrl(rule.homepageUrl) ? String(rule.homepageUrl).trim() : '';
+  const announcementCombined = combineAnnouncementUrls(rule.announcementUrl, rule.announcementUrls);
+  return {
+    schoolName,
+    aliases,
+    homepageUrl,
+    announcementUrl: announcementCombined.urls[0] || '',
+    announcementUrls: announcementCombined.urls,
+    collegeName: String(rule.collegeName || '').trim(),
+    includeCollegePages: rule.includeCollegePages !== false
+  };
+}
+
+function buildPriorityRuleKeyCandidates(ruleLike) {
+  const rule = normalizePrioritySchoolRule(ruleLike);
+  const values = [rule.schoolName, ...(Array.isArray(rule.aliases) ? rule.aliases : [])];
+  return Array.from(new Set(values.map((value) => normalizeMatchText(value)).filter(Boolean)));
+}
+
+function resolvePrioritySchoolRuleBySchoolName(schoolName) {
+  const target = normalizeMatchText(schoolName);
+  if (!target) return null;
+  let fallback = null;
+  for (const ruleLike of BUILTIN_PRIORITY_SCHOOL_RULES) {
+    const rule = normalizePrioritySchoolRule(ruleLike);
+    if (!rule.schoolName) continue;
+    const keys = buildPriorityRuleKeyCandidates(rule);
+    if (!keys.length) continue;
+    if (keys.includes(target)) return rule;
+    if (!fallback) {
+      const mainKey = normalizeMatchText(rule.schoolName);
+      if (mainKey && (target.includes(mainKey) || mainKey.includes(target))) {
+        fallback = rule;
+      }
+    }
+  }
+  return fallback;
+}
+
+function collectBuiltInPrioritySchoolCandidates(limit = ADJUSTMENT_PRIORITY_SCHOOL_LIMIT) {
+  return BUILTIN_PRIORITY_SCHOOL_RULES.map((item, index) => {
+    const rule = normalizePrioritySchoolRule(item);
+    if (!rule.schoolName) return null;
+    return {
+      id: `builtin_priority_${index + 1}`,
+      schoolName: rule.schoolName,
+      collegeName: rule.collegeName || '',
+      includeCollegePages: rule.includeCollegePages !== false,
+      homepageUrl: rule.homepageUrl || '',
+      announcementUrl: rule.announcementUrl || '',
+      announcementUrls: rule.announcementUrls || [],
+      sourceTag: 'builtin_priority_rule',
+      score: Math.max(18, 160 - index * 2),
+      source: 'builtin_priority_rule',
+      priority: true
+    };
+  })
+    .filter(Boolean)
+    .slice(0, Math.max(1, Number(limit) || ADJUSTMENT_PRIORITY_SCHOOL_LIMIT));
 }
 
 function createYanzhaoSessionState() {
@@ -3936,19 +4106,22 @@ function collectAdjustmentPrioritySchoolCandidates(records, limit = ADJUSTMENT_P
     if (!normalized.schoolName) return;
     const key = buildQuickRetestSchoolDedupKey(normalized);
     if (!key) return;
-    const baseScore = 2200 - index * 12;
+    const baseScore = Math.max(20, 180 - index * 3);
     const old = map.get(key);
     if (!old || (old.score || 0) < baseScore) {
       map.set(key, {
         schoolName: normalized.schoolName,
         collegeName: normalized.collegeName || '',
         includeCollegePages: normalized.includeCollegePages !== false,
+        homepageUrl: normalized.homepageUrl || '',
+        announcementUrl: normalized.announcementUrl || '',
+        announcementUrls: Array.isArray(normalized.announcementUrls) ? normalized.announcementUrls.slice(0, 8) : [],
         dwdm: '',
         ssmc: '',
         ssdm: '',
         majorMatches: [],
         score: baseScore,
-        source: 'priority_list',
+        source: normalized.sourceTag || 'priority_list',
         priority: true
       });
     }
@@ -4015,6 +4188,9 @@ function mergeAdjustmentMajorSchoolCandidates(primarySchools, cachedSchools, lim
         schoolName: school.schoolName,
         collegeName: school.collegeName || '',
         includeCollegePages: school.includeCollegePages !== false,
+        homepageUrl: String(school.homepageUrl || '').trim(),
+        announcementUrl: String(school.announcementUrl || '').trim(),
+        announcementUrls: Array.isArray(school.announcementUrls) ? school.announcementUrls.slice(0, 8) : [],
         dwdm: String(school.dwdm || '').trim(),
         ssmc: school.ssmc || '',
         ssdm: school.ssdm || '',
@@ -4028,6 +4204,17 @@ function mergeAdjustmentMajorSchoolCandidates(primarySchools, cachedSchools, lim
     old.score += Math.round(cacheScore * 0.45);
     if (!old.collegeName && school.collegeName) old.collegeName = school.collegeName;
     if (typeof old.includeCollegePages !== 'boolean') old.includeCollegePages = school.includeCollegePages !== false;
+    if (!old.homepageUrl && school.homepageUrl) old.homepageUrl = String(school.homepageUrl || '').trim();
+    if (!old.announcementUrl && school.announcementUrl) old.announcementUrl = String(school.announcementUrl || '').trim();
+    if (Array.isArray(school.announcementUrls) && school.announcementUrls.length) {
+      const mergedUrls = new Set(
+        [old.announcementUrl, ...(Array.isArray(old.announcementUrls) ? old.announcementUrls : []), ...school.announcementUrls]
+          .map((url) => String(url || '').trim())
+          .filter((url) => isValidHttpUrl(url))
+      );
+      old.announcementUrls = Array.from(mergedUrls).slice(0, 8);
+      if (!old.announcementUrl) old.announcementUrl = old.announcementUrls[0] || '';
+    }
     old.source = old.source || school.source || '';
     old.priority = Boolean(old.priority || school.priority);
     old.majorMatches = mergeMajorMatchEntries([...(old.majorMatches || []), ...(school.majorMatches || [])], 6);
@@ -4752,6 +4939,8 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
   const schoolName = String(schoolCandidate?.schoolName || schoolCandidate?.dwmc || '').trim();
   const collegeName = String(schoolCandidate?.collegeName || '').trim();
   const includeCollegePages = schoolCandidate?.includeCollegePages !== false;
+  const homepageUrl = isValidHttpUrl(schoolCandidate?.homepageUrl) ? String(schoolCandidate.homepageUrl).trim() : '';
+  const announcementUrls = normalizeAnnouncementUrls(schoolCandidate?.announcementUrls || schoolCandidate?.announcementUrl || []).urls;
   const majorKeyword = String(options.majorKeyword || '').trim();
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const keywordMatchers = Array.isArray(options.keywordMatchers) ? options.keywordMatchers : [];
@@ -4772,6 +4961,8 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
       schoolName,
       collegeName,
       includeCollegePages,
+      homepageUrl,
+      announcementUrls,
       focus: 'general'
     });
     const seeds = Array.isArray(queryResult.items) ? queryResult.items.slice(0, maxNoticesPerSchool) : [];
@@ -4974,8 +5165,12 @@ async function runAdjustmentMajorTest(options = {}) {
   const cachedSchoolSeeds = collectAdjustmentMajorCachedSchools(cachedRecords, Math.max(maxSchools * 2, 16));
   const cachedItemSeeds = collectAdjustmentMajorCachedItems(cachedRecords, 240, targetYear);
   const runtimeConfig = await readConfig().catch(() => ({ adjustmentPrioritySchools: [] }));
-  const prioritySchoolSeeds = usePrioritySchools
+  const userPrioritySchoolSeeds = usePrioritySchools
     ? collectAdjustmentPrioritySchoolCandidates(runtimeConfig.adjustmentPrioritySchools || [], ADJUSTMENT_PRIORITY_SCHOOL_LIMIT)
+    : [];
+  const builtinPrioritySchoolSeeds = usePrioritySchools ? collectBuiltInPrioritySchoolCandidates(ADJUSTMENT_PRIORITY_SCHOOL_LIMIT) : [];
+  const prioritySchoolSeeds = usePrioritySchools
+    ? mergeAdjustmentMajorSchoolCandidates(userPrioritySchoolSeeds, builtinPrioritySchoolSeeds, ADJUSTMENT_PRIORITY_SCHOOL_LIMIT)
     : [];
   const supplementSchoolSeeds = [...prioritySchoolSeeds, ...cachedSchoolSeeds];
 
@@ -5117,7 +5312,9 @@ async function runAdjustmentMajorTest(options = {}) {
         usedCacheFallback: false,
         freshNotices: 0,
         previewOnly: true,
-        prioritySchoolSeeds: prioritySchoolSeeds.length
+        prioritySchoolSeeds: prioritySchoolSeeds.length,
+        userPrioritySchools: userPrioritySchoolSeeds.length,
+        builtinPriorityRules: builtinPrioritySchoolSeeds.length
       },
       items: []
     };
@@ -5184,6 +5381,8 @@ async function runAdjustmentMajorTest(options = {}) {
     usedCacheFallback,
     freshNotices: freshItems.length,
     prioritySchoolSeeds: prioritySchoolSeeds.length,
+    userPrioritySchools: userPrioritySchoolSeeds.length,
+    builtinPriorityRules: builtinPrioritySchoolSeeds.length,
     searchFallbackSchools: schools.filter((school) => Boolean(school?.summary?.searchFallbackUsed)).length,
     searchFallbackNotices: schools.reduce((sum, school) => sum + Math.max(0, Number(school?.summary?.searchFallbackAdded || 0)), 0)
   };
@@ -7630,7 +7829,10 @@ app.post('/api/graduate-news-batch', async (req, res) => {
 
 app.get('/api/adjustment-priority-schools', async (_, res) => {
   const config = await readConfig();
-  res.json({ schools: config.adjustmentPrioritySchools || [] });
+  res.json({
+    schools: config.adjustmentPrioritySchools || [],
+    builtinRuleCount: BUILTIN_PRIORITY_SCHOOL_RULES.length
+  });
 });
 
 app.post('/api/adjustment-priority-schools', async (req, res) => {
@@ -7706,6 +7908,49 @@ app.post('/api/adjustment-priority-schools/sync', async (req, res) => {
     res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message || 'Failed to sync priority schools' });
+  }
+});
+
+app.post('/api/adjustment-priority-schools/bootstrap', async (req, res) => {
+  const body = req.body || {};
+  const replaceAll = normalizeBooleanFlag(body.replaceAll, false);
+  try {
+    const result = await mutateConfig(async (config) => {
+      const builtinRecords = collectBuiltInPrioritySchoolCandidates(ADJUSTMENT_PRIORITY_SCHOOL_LIMIT).map((item) =>
+        normalizeQuickRetestSchoolRecord({
+          schoolName: item.schoolName,
+          collegeName: item.collegeName || '',
+          includeCollegePages: item.includeCollegePages !== false,
+          homepageUrl: item.homepageUrl || '',
+          announcementUrls: item.announcementUrls || [],
+          sourceTag: 'builtin_priority_rule'
+        })
+      );
+      const before = Array.isArray(config.adjustmentPrioritySchools) ? config.adjustmentPrioritySchools.length : 0;
+      if (replaceAll) {
+        config.adjustmentPrioritySchools = mergeQuickSchoolRecords([], builtinRecords, ADJUSTMENT_PRIORITY_SCHOOL_LIMIT);
+      } else {
+        config.adjustmentPrioritySchools = mergeQuickSchoolRecords(
+          config.adjustmentPrioritySchools || [],
+          builtinRecords,
+          ADJUSTMENT_PRIORITY_SCHOOL_LIMIT
+        );
+      }
+      return {
+        before,
+        syncedCount: Math.max(0, config.adjustmentPrioritySchools.length - before),
+        schools: config.adjustmentPrioritySchools
+      };
+    });
+    res.json({
+      ok: true,
+      syncedCount: result.syncedCount,
+      total: Array.isArray(result.schools) ? result.schools.length : 0,
+      builtinRuleCount: BUILTIN_PRIORITY_SCHOOL_RULES.length,
+      schools: result.schools
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Failed to bootstrap priority schools' });
   }
 });
 
