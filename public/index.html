@@ -53,15 +53,47 @@
 
         <div class="home-center">
           <section class="card hero-card">
-            <div class="hero-copy">
-              <h1>高校研招公告工作台</h1>
-              <p class="subtitle hero-subtitle">把研招信息检索做成“博客阅读流”：先定位院校入口，再筛选公告正文，最后沉淀为可追踪的 Markdown 文档。</p>
-            </div>
-            <div class="hero-badges">
-              <span>智能导航</span>
-              <span>正文抓取</span>
-              <span>调剂清洗</span>
-              <span>Markdown 归档</span>
+            <div class="hero-layout">
+              <div class="hero-copy">
+                <span class="section-label">招生信息研究台</span>
+                <h1>高校研招公告工作台</h1>
+                <p class="subtitle hero-subtitle">把研招信息检索做成一条流畅的工作带：先定位院校入口，再筛选公告正文，最后沉淀为可追踪、可复盘的 Markdown 文档。</p>
+                <div class="hero-badges">
+                  <span>智能导航</span>
+                  <span>正文抓取</span>
+                  <span>调剂清洗</span>
+                  <span>Markdown 归档</span>
+                </div>
+                <div class="hero-actions" id="hero-actions">
+                  <button type="button" class="hero-action-primary" data-module="adjustment-module" data-jump="true">从调剂导航开始</button>
+                  <button type="button" data-module="news-query-module" data-focus="general" data-jump="true">查看今日公告</button>
+                  <button type="button" data-module="daily-module" data-jump="true">维护每日任务</button>
+                </div>
+              </div>
+              <aside class="hero-aside" aria-label="工作台概览">
+                <div class="hero-note">
+                  <span class="section-label">当前工作方式</span>
+                  <strong>像编辑台一样处理线索，而不是堆一页表单。</strong>
+                  <p>首页负责分流，模块负责执行，结果区负责筛选和沉淀，让每天的检索动作更稳定、更顺手。</p>
+                </div>
+                <div class="hero-metrics">
+                  <article class="hero-metric">
+                    <span>发现</span>
+                    <strong>官网入口</strong>
+                    <p>先找准学校、研招页与学院页，减少无效抓取。</p>
+                  </article>
+                  <article class="hero-metric">
+                    <span>判断</span>
+                    <strong>公告候选</strong>
+                    <p>先筛选后抓正文，把人工判断放在真正关键的位置。</p>
+                  </article>
+                  <article class="hero-metric">
+                    <span>留存</span>
+                    <strong>Markdown 档案</strong>
+                    <p>把临时查询变成可复盘的知识资产与长期任务。</p>
+                  </article>
+                </div>
+              </aside>
             </div>
             <p class="subtitle hero-tip">推荐从“精选专栏”进入，你的筛选条件和固定院校会自动保留。</p>
           </section>
@@ -123,7 +155,7 @@
         </div>
       </section>
 
-      <section class="card module-panel" id="adjustment-module">
+      <section class="card module-panel module-panel-discovery" id="adjustment-module">
         <h2>研究生调剂智能导航</h2>
         <p class="subtitle">根据院校名与学院名智能匹配官网、研究生招生页面和学院页面，适合作为全流程的第一步。</p>
         <div class="module-split">
@@ -216,7 +248,7 @@
         </div>
       </section>
 
-      <section class="card module-panel hidden" id="news-query-module">
+      <section class="card module-panel module-panel-insight hidden" id="news-query-module">
         <h2>院校新公告查询</h2>
         <p class="subtitle">用于查询近三日研招公告或复试信息，结果支持筛选、分页和页内浏览。</p>
         <div class="module-split">
@@ -313,7 +345,7 @@
         </div>
       </section>
 
-      <section class="card module-panel hidden" id="adjustment-clean-module">
+      <section class="card module-panel module-panel-clean hidden" id="adjustment-clean-module">
         <h2>调剂数据清洗</h2>
         <div class="module-split">
           <div class="module-main">
@@ -424,7 +456,7 @@
         </div>
       </section>
 
-      <section class="card module-panel hidden" id="adjustment-major-test-module">
+      <section class="card module-panel module-panel-major hidden" id="adjustment-major-test-module">
         <h2>专业调剂测试</h2>
         <p class="subtitle">先按专业匹配院校，再结合高校官网研招正文进行二次过滤，适合用来找某个专业可能存在的调剂信息。</p>
 
@@ -526,7 +558,7 @@
         </div>
       </section>
 
-      <section class="card module-panel" id="daily-module">
+      <section class="card module-panel module-panel-automation" id="daily-module">
         <h2>每日爬取任务</h2>
         <p class="subtitle">适合长期跟踪固定院校。先保存任务，再按设定时间自动抓取，也可以随时暂停、开启或手动执行。</p>
         <form id="task-form" class="form-grid">
@@ -606,7 +638,7 @@
         </div>
       </section>
 
-      <section class="card module-panel" id="manual-module">
+      <section class="card module-panel module-panel-manual" id="manual-module">
         <h2>自助爬取（一次性）</h2>
         <p class="subtitle">适合临时查询。手动输入官网或公告页后先扫描候选，再确认抓取正文，不会自动创建每日任务。</p>
         <form id="manual-form" class="form-grid">
@@ -685,7 +717,7 @@
         </div>
       </section>
 
-      <section class="card hidden module-panel" id="scan-panel">
+      <section class="card hidden module-panel module-panel-review" id="scan-panel">
         <h2>候选公告确认区</h2>
         <p class="subtitle">这里展示扫描出来的候选公告。勾选后才会抓取正文并生成文件，适合先人工把关再导出。</p>
         <p id="scan-info" class="subtitle"></p>
@@ -719,13 +751,13 @@
         <div id="scan-pager" class="pager"></div>
       </section>
 
-      <section class="card module-panel" id="tasks-module">
+      <section class="card module-panel module-panel-tasks" id="tasks-module">
         <h2>任务列表</h2>
         <p class="subtitle">统一管理每日任务，可查看最近运行状态、结果文件，并对任务进行编辑、启停或立即执行。</p>
         <div id="task-list" class="task-list"></div>
       </section>
 
-      <section class="card module-panel" id="files-module">
+      <section class="card module-panel module-panel-files" id="files-module">
         <h2>Markdown 输出</h2>
         <p class="subtitle">集中查看已生成的 Markdown 文件，支持预览、清洗、批量删除、下载和本地定位。</p>
         <div class="actions" id="file-actions">

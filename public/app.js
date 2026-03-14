@@ -43,6 +43,7 @@ const fileDeleteAllBtn = document.getElementById('file-delete-all');
 const moduleTabs = document.getElementById('module-tabs');
 const featureGrid = document.getElementById('feature-grid');
 const mastheadNav = document.getElementById('masthead-nav');
+const heroActions = document.getElementById('hero-actions');
 const modulePanels = Array.from(document.querySelectorAll('.module-panel'));
 
 const scanPanel = document.getElementById('scan-panel');
@@ -1629,7 +1630,7 @@ function normalizeNewsFocus(value) {
 
 function syncModuleTabsActiveState() {
   activeNewsQueryFocus = normalizeNewsFocus(newsQueryFocus?.value || activeNewsQueryFocus);
-  [mastheadNav, moduleTabs, featureGrid].forEach((container) => {
+  [mastheadNav, moduleTabs, featureGrid, heroActions].forEach((container) => {
     if (!container) return;
     container.querySelectorAll('[data-module]').forEach((btn) => {
       const targetModule = btn.dataset.module;
@@ -3273,6 +3274,7 @@ document.getElementById('reset-btn').addEventListener('click', resetTaskForm);
 bindModuleNavigation(moduleTabs);
 bindModuleNavigation(featureGrid);
 bindModuleNavigation(mastheadNav);
+bindModuleNavigation(heroActions);
 
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {
