@@ -6,3 +6,10 @@ data/users.json
 data/yanzhao_catalog.json
 data/adjustment_major_test_cache.json
 data/*.tmp
+data/app.db
+data/app.db-shm
+data/app.db-wal
+data/mysql-data/
+data/mysql.pid
+data/mysql-my.ini
+data/mysql-bootstrap.sql

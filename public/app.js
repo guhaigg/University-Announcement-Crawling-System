@@ -825,7 +825,7 @@ function collectAdjustmentMajorTestPayload() {
     majorKeyword: String(adjustmentMajorTestMajor?.value || '').trim(),
     targetYear: String(adjustmentMajorTestYear?.value || '').trim(),
     keywords: String(adjustmentMajorTestKeywords?.value || '').trim(),
-    maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 8),
+    maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 20),
     maxNoticesPerSchool: Number(adjustmentMajorTestMaxNotices?.value || 14),
     maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 8),
     refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked)

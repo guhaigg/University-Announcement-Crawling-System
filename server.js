@@ -11,6 +11,7 @@ const dns = require('dns/promises');
 const net = require('net');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+let DatabaseSync = null;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,23 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const YANZHAO_CATALOG_FILE = path.join(DATA_DIR, 'yanzhao_catalog.json');
 const ADJUSTMENT_MAJOR_TEST_CACHE_FILE = path.join(DATA_DIR, 'adjustment_major_test_cache.json');
+const STORAGE_BACKEND_RAW = String(process.env.STORAGE_BACKEND || 'json').trim().toLowerCase();
+const STORAGE_BACKEND = ['json', 'sqlite', 'mysql'].includes(STORAGE_BACKEND_RAW) ? STORAGE_BACKEND_RAW : 'json';
+const SQLITE_DB_FILE = path.resolve(
+  DATA_DIR,
+  String(process.env.STORAGE_SQLITE_FILE || 'app.db').trim() || 'app.db'
+);
+const MYSQL_HOST = String(process.env.MYSQL_HOST || '127.0.0.1').trim() || '127.0.0.1';
+const MYSQL_PORT = Math.max(1, Math.min(65535, Number(process.env.MYSQL_PORT) || 3306));
+const MYSQL_USER = String(process.env.MYSQL_USER || '').trim();
+const MYSQL_PASSWORD = String(process.env.MYSQL_PASSWORD || '');
+const MYSQL_DATABASE = String(process.env.MYSQL_DATABASE || 'codex_yz').trim() || 'codex_yz';
+const MYSQL_TABLE_KV = String(process.env.MYSQL_TABLE_KV || 'app_kv').trim() || 'app_kv';
+const MYSQL_TABLE_KV_SAFE = /^[A-Za-z0-9_]+$/.test(MYSQL_TABLE_KV) ? MYSQL_TABLE_KV : 'app_kv';
+const STORAGE_KEY_CONFIG = 'config';
+const STORAGE_KEY_USERS = 'users';
+const STORAGE_KEY_YANZHAO_CATALOG = 'yanzhao_catalog';
+const STORAGE_KEY_ADJUSTMENT_MAJOR_TEST_CACHE = 'adjustment_major_test_cache';
 const SESSION_COOKIE_NAME = 'crawler_sid';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ADMIN_USER = String(process.env.DEFAULT_ADMIN_USER || 'admin').trim() || 'admin';
@@ -50,6 +68,7 @@ const ADJUSTMENT_HINTS = ['调剂', '调剂公告', '调剂通知', '调剂复�
 const RETEST_HINTS = ['复试', '复试通知', '复试安排', '复试名单', '复试资格', '复试分数线', '复试成绩', '面试', '综合面试', '综合考核'];
 const COLLEGE_HINTS = ['学院', '学部', '系', '研究院', '学院官网', 'school', 'college', 'department', 'faculty'];
 const MANUAL_PRESET_LIMIT = 10;
+const ADJUSTMENT_PRIORITY_SCHOOL_LIMIT = 50;
 const GRAD_PORTAL_URL_RE = /(yjs|yz|gsao|admission|graduate|yjszs|yzb|gra)/i;
 const NEWS_PORTAL_URL_RE = /(news|xw|ztrd|mtbd)/i;
 const GRAD_PORTAL_HINTS = ['研究生院', '研究生处', '研招网', '研究生招生', 'graduate school', 'grs', 'gsao', 'yjsy', 'yzb'];
@@ -119,6 +138,9 @@ const loginAttemptStore = new Map();
 let configMutationQueue = Promise.resolve();
 let majorTestCacheMutationQueue = Promise.resolve();
 const execFileAsync = promisify(execFile);
+let sqliteDb = null;
+let mysqlPool = null;
+let mysqlLib = null;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(ROOT, 'public')));
@@ -130,6 +152,174 @@ function nowTs() {
 function sleep(ms) {
   const delay = Math.max(0, Number(ms) || 0);
   return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+function isSqliteStorageEnabled() {
+  return STORAGE_BACKEND === 'sqlite';
+}
+
+function isMySqlStorageEnabled() {
+  return STORAGE_BACKEND === 'mysql';
+}
+
+function isDatabaseStorageEnabled() {
+  return isSqliteStorageEnabled() || isMySqlStorageEnabled();
+}
+
+function ensureSqliteDatabase() {
+  if (!isSqliteStorageEnabled()) return null;
+  if (!DatabaseSync) {
+    try {
+      ({ DatabaseSync } = require('node:sqlite'));
+    } catch (error) {
+      throw new Error('STORAGE_BACKEND=sqlite but node:sqlite is unavailable in this runtime');
+    }
+  }
+  if (!sqliteDb) {
+    sqliteDb = new DatabaseSync(SQLITE_DB_FILE);
+    sqliteDb.exec('PRAGMA journal_mode = WAL;');
+    sqliteDb.exec(`
+      CREATE TABLE IF NOT EXISTS app_kv (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  }
+  return sqliteDb;
+}
+
+function sqliteHasKey(key) {
+  const db = ensureSqliteDatabase();
+  const row = db.prepare('SELECT 1 AS ok FROM app_kv WHERE key = ? LIMIT 1').get(String(key || '').trim());
+  return Boolean(row?.ok);
+}
+
+function readSqliteJson(key, fallbackValue = null) {
+  const db = ensureSqliteDatabase();
+  const row = db.prepare('SELECT value FROM app_kv WHERE key = ? LIMIT 1').get(String(key || '').trim());
+  if (!row || typeof row.value !== 'string') {
+    return fallbackValue;
+  }
+  try {
+    return JSON.parse(row.value);
+  } catch (error) {
+    throw new Error(`sqlite key ${key} contains invalid JSON`);
+  }
+}
+
+function writeSqliteJson(key, value) {
+  const db = ensureSqliteDatabase();
+  const normalizedKey = String(key || '').trim();
+  const payload = JSON.stringify(value);
+  const updatedAt = nowIsoSafe();
+  db.prepare(
+    `
+      INSERT INTO app_kv (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `
+  ).run(normalizedKey, payload, updatedAt);
+  return value;
+}
+
+async function ensureMySqlDatabase() {
+  if (!isMySqlStorageEnabled()) return null;
+  if (!MYSQL_USER) {
+    throw new Error('STORAGE_BACKEND=mysql requires MYSQL_USER');
+  }
+  if (!mysqlLib) {
+    mysqlLib = require('mysql2/promise');
+  }
+  if (!mysqlPool) {
+    mysqlPool = mysqlLib.createPool({
+      host: MYSQL_HOST,
+      port: MYSQL_PORT,
+      user: MYSQL_USER,
+      password: MYSQL_PASSWORD,
+      database: MYSQL_DATABASE,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      charset: 'utf8mb4'
+    });
+    await mysqlPool.query(`
+      CREATE TABLE IF NOT EXISTS \`${MYSQL_TABLE_KV_SAFE}\` (
+        \`key\` VARCHAR(128) NOT NULL PRIMARY KEY,
+        \`value\` LONGTEXT NOT NULL,
+        \`updated_at\` DATETIME(3) NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+  }
+  return mysqlPool;
+}
+
+async function storageHasKey(key) {
+  if (isSqliteStorageEnabled()) {
+    return sqliteHasKey(key);
+  }
+  if (isMySqlStorageEnabled()) {
+    const pool = await ensureMySqlDatabase();
+    const [rows] = await pool.query(`SELECT 1 AS ok FROM \`${MYSQL_TABLE_KV_SAFE}\` WHERE \`key\` = ? LIMIT 1`, [String(key || '').trim()]);
+    return Boolean(Array.isArray(rows) && rows[0]?.ok);
+  }
+  return false;
+}
+
+async function readStorageJson(key, fallbackValue = null) {
+  if (isSqliteStorageEnabled()) {
+    return readSqliteJson(key, fallbackValue);
+  }
+  if (isMySqlStorageEnabled()) {
+    const pool = await ensureMySqlDatabase();
+    const [rows] = await pool.query(`SELECT \`value\` FROM \`${MYSQL_TABLE_KV_SAFE}\` WHERE \`key\` = ? LIMIT 1`, [String(key || '').trim()]);
+    const value = Array.isArray(rows) ? rows[0]?.value : null;
+    if (typeof value !== 'string') {
+      return fallbackValue;
+    }
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      throw new Error(`mysql key ${key} contains invalid JSON`);
+    }
+  }
+  return fallbackValue;
+}
+
+async function writeStorageJson(key, value) {
+  if (isSqliteStorageEnabled()) {
+    writeSqliteJson(key, value);
+    return value;
+  }
+  if (isMySqlStorageEnabled()) {
+    const pool = await ensureMySqlDatabase();
+    await pool.query(
+      `
+        INSERT INTO \`${MYSQL_TABLE_KV_SAFE}\` (\`key\`, \`value\`, \`updated_at\`)
+        VALUES (?, ?, NOW(3))
+        ON DUPLICATE KEY UPDATE
+          \`value\` = VALUES(\`value\`),
+          \`updated_at\` = VALUES(\`updated_at\`)
+      `,
+      [String(key || '').trim(), JSON.stringify(value)]
+    );
+    return value;
+  }
+  return value;
+}
+
+async function readJsonFileIfExists(filePath, fallbackValue = null) {
+  try {
+    const raw = await fsp.readFile(filePath, 'utf8');
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return fallbackValue;
+    }
+    throw error;
+  }
 }
 
 function normalizeOriginValue(input) {
@@ -332,6 +522,13 @@ function normalizeUserRecord(raw) {
 }
 
 async function readUsers() {
+  if (isDatabaseStorageEnabled()) {
+    const parsed = await readStorageJson(STORAGE_KEY_USERS, { users: [] });
+    const users = (Array.isArray(parsed?.users) ? parsed.users : [])
+      .map(normalizeUserRecord)
+      .filter((u) => u.username && u.passwordHash && u.passwordSalt);
+    return { users };
+  }
   try {
     const raw = await fsp.readFile(USERS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
@@ -351,6 +548,10 @@ async function writeUsers(payload) {
   const data = {
     users: (Array.isArray(payload?.users) ? payload.users : []).map(normalizeUserRecord)
   };
+  if (isDatabaseStorageEnabled()) {
+    await writeStorageJson(STORAGE_KEY_USERS, data);
+    return;
+  }
   const tmpFile = `${USERS_FILE}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmpFile, JSON.stringify(data, null, 2), 'utf8');
   await fsp.rename(tmpFile, USERS_FILE);
@@ -441,39 +642,99 @@ function authRequired(req, res, next) {
 
 app.use(authRequired);
 
+function createDefaultConfigData() {
+  return {
+    tasks: [],
+    manualPresets: [],
+    quickRetestSchools: [],
+    quickNewsSchools: [],
+    quickAdjustmentSchools: [],
+    quickAdjustmentCleanSchools: [],
+    adjustmentPrioritySchools: []
+  };
+}
+
+function createDefaultYanzhaoCatalogData() {
+  return {
+    version: 1,
+    source: YANZHAO_BASE_URL,
+    refreshedAt: '',
+    generatedAt: nowIsoSafe(),
+    schools: [],
+    majors: []
+  };
+}
+
+function createDefaultAdjustmentMajorTestCacheData() {
+  return {
+    version: 1,
+    updatedAt: nowIsoSafe(),
+    records: []
+  };
+}
+
+async function seedDatabaseStorageFromJsonFiles() {
+  if (!isDatabaseStorageEnabled()) return;
+  if (isSqliteStorageEnabled()) {
+    ensureSqliteDatabase();
+  } else if (isMySqlStorageEnabled()) {
+    await ensureMySqlDatabase();
+  }
+  const seedItems = [
+    {
+      key: STORAGE_KEY_CONFIG,
+      filePath: CONFIG_FILE,
+      fallback: createDefaultConfigData
+    },
+    {
+      key: STORAGE_KEY_USERS,
+      filePath: USERS_FILE,
+      fallback: () => ({ users: [] })
+    },
+    {
+      key: STORAGE_KEY_YANZHAO_CATALOG,
+      filePath: YANZHAO_CATALOG_FILE,
+      fallback: createDefaultYanzhaoCatalogData
+    },
+    {
+      key: STORAGE_KEY_ADJUSTMENT_MAJOR_TEST_CACHE,
+      filePath: ADJUSTMENT_MAJOR_TEST_CACHE_FILE,
+      fallback: createDefaultAdjustmentMajorTestCacheData
+    }
+  ];
+  for (const item of seedItems) {
+    if (await storageHasKey(item.key)) continue;
+    const fromFile = await readJsonFileIfExists(item.filePath, null);
+    const value = fromFile && typeof fromFile === 'object' ? fromFile : item.fallback();
+    await writeStorageJson(item.key, value);
+  }
+}
+
 async function ensureStorage() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.mkdir(OUTPUT_DIR, { recursive: true });
+  if (isSqliteStorageEnabled()) {
+    ensureSqliteDatabase();
+  } else if (isMySqlStorageEnabled()) {
+    await ensureMySqlDatabase();
+  }
 
-  if (!fs.existsSync(CONFIG_FILE)) {
-    await writeConfig({
-      tasks: [],
-      manualPresets: [],
-      quickRetestSchools: [],
-      quickNewsSchools: [],
-      quickAdjustmentSchools: [],
-      quickAdjustmentCleanSchools: []
-    });
+  if (!isDatabaseStorageEnabled()) {
+    if (!fs.existsSync(CONFIG_FILE)) {
+      await writeConfig(createDefaultConfigData());
+    }
+    if (!fs.existsSync(USERS_FILE)) {
+      await writeUsers({ users: [] });
+    }
+    if (!fs.existsSync(YANZHAO_CATALOG_FILE)) {
+      await writeYanzhaoCatalog(createDefaultYanzhaoCatalogData());
+    }
+    if (!fs.existsSync(ADJUSTMENT_MAJOR_TEST_CACHE_FILE)) {
+      await writeAdjustmentMajorTestCache(createDefaultAdjustmentMajorTestCacheData());
+    }
   }
-  if (!fs.existsSync(USERS_FILE)) {
-    await writeUsers({ users: [] });
-  }
-  if (!fs.existsSync(YANZHAO_CATALOG_FILE)) {
-    await writeYanzhaoCatalog({
-      version: 1,
-      source: YANZHAO_BASE_URL,
-      refreshedAt: '',
-      generatedAt: nowIsoSafe(),
-      schools: [],
-      majors: []
-    });
-  }
-  if (!fs.existsSync(ADJUSTMENT_MAJOR_TEST_CACHE_FILE)) {
-    await writeAdjustmentMajorTestCache({
-      version: 1,
-      updatedAt: nowIsoSafe(),
-      records: []
-    });
+  if (isDatabaseStorageEnabled()) {
+    await seedDatabaseStorageFromJsonFiles();
   }
   const userData = await readUsers();
   if (!Array.isArray(userData.users) || userData.users.length === 0) {
@@ -497,18 +758,30 @@ async function ensureStorage() {
 }
 
 async function readConfig(retries = 2) {
-  try {
-    const raw = await fsp.readFile(CONFIG_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : []).map(normalizeTaskRecord);
-    const rawPresets = (Array.isArray(parsed.manualPresets) ? parsed.manualPresets : []).map(normalizePresetRecord);
+  if (isDatabaseStorageEnabled()) {
+    const parsed = await readStorageJson(STORAGE_KEY_CONFIG, createDefaultConfigData());
+    const tasks = (Array.isArray(parsed?.tasks) ? parsed.tasks : []).map(normalizeTaskRecord);
+    const rawPresets = (Array.isArray(parsed?.manualPresets) ? parsed.manualPresets : []).map(normalizePresetRecord);
     const rawQuickNewsSchools = (
-      Array.isArray(parsed.quickNewsSchools) ? parsed.quickNewsSchools : Array.isArray(parsed.quickRetestSchools) ? parsed.quickRetestSchools : []
+      Array.isArray(parsed?.quickNewsSchools)
+        ? parsed.quickNewsSchools
+        : Array.isArray(parsed?.quickRetestSchools)
+          ? parsed.quickRetestSchools
+          : []
     ).map(normalizeQuickRetestSchoolRecord);
-    const rawQuickAdjustmentSchools = (Array.isArray(parsed.quickAdjustmentSchools) ? parsed.quickAdjustmentSchools : []).map(normalizeQuickRetestSchoolRecord);
+    const rawQuickAdjustmentSchools = (Array.isArray(parsed?.quickAdjustmentSchools) ? parsed.quickAdjustmentSchools : []).map(
+      normalizeQuickRetestSchoolRecord
+    );
     const rawQuickAdjustmentCleanSchools = (
-      Array.isArray(parsed.quickAdjustmentCleanSchools) ? parsed.quickAdjustmentCleanSchools : []
+      Array.isArray(parsed?.quickAdjustmentCleanSchools) ? parsed.quickAdjustmentCleanSchools : []
     ).map(normalizeAdjustmentCleanQuickRecord);
+    const rawAdjustmentPrioritySchools = (
+      Array.isArray(parsed?.adjustmentPrioritySchools)
+        ? parsed.adjustmentPrioritySchools
+        : Array.isArray(parsed?.quickAdjustmentSchools)
+          ? parsed.quickAdjustmentSchools
+          : []
+    ).map(normalizeQuickRetestSchoolRecord);
     const manualPresets = [];
     const seen = new Set();
     for (const preset of rawPresets) {
@@ -545,13 +818,97 @@ async function readConfig(retries = 2) {
       quickAdjustmentCleanSchools.push(school);
       if (quickAdjustmentCleanSchools.length >= 10) break;
     }
+    const adjustmentPrioritySchools = [];
+    const prioritySeen = new Set();
+    for (const school of rawAdjustmentPrioritySchools) {
+      const key = buildQuickRetestSchoolDedupKey(school);
+      if (prioritySeen.has(key)) continue;
+      prioritySeen.add(key);
+      adjustmentPrioritySchools.push(school);
+      if (adjustmentPrioritySchools.length >= ADJUSTMENT_PRIORITY_SCHOOL_LIMIT) break;
+    }
     return {
       tasks,
       manualPresets,
       quickRetestSchools: quickNewsSchools,
       quickNewsSchools,
       quickAdjustmentSchools,
-      quickAdjustmentCleanSchools
+      quickAdjustmentCleanSchools,
+      adjustmentPrioritySchools
+    };
+  }
+  try {
+    const raw = await fsp.readFile(CONFIG_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : []).map(normalizeTaskRecord);
+    const rawPresets = (Array.isArray(parsed.manualPresets) ? parsed.manualPresets : []).map(normalizePresetRecord);
+    const rawQuickNewsSchools = (
+      Array.isArray(parsed.quickNewsSchools) ? parsed.quickNewsSchools : Array.isArray(parsed.quickRetestSchools) ? parsed.quickRetestSchools : []
+    ).map(normalizeQuickRetestSchoolRecord);
+    const rawQuickAdjustmentSchools = (Array.isArray(parsed.quickAdjustmentSchools) ? parsed.quickAdjustmentSchools : []).map(normalizeQuickRetestSchoolRecord);
+    const rawQuickAdjustmentCleanSchools = (
+      Array.isArray(parsed.quickAdjustmentCleanSchools) ? parsed.quickAdjustmentCleanSchools : []
+    ).map(normalizeAdjustmentCleanQuickRecord);
+    const rawAdjustmentPrioritySchools = (
+      Array.isArray(parsed.adjustmentPrioritySchools)
+        ? parsed.adjustmentPrioritySchools
+        : Array.isArray(parsed.quickAdjustmentSchools)
+          ? parsed.quickAdjustmentSchools
+          : []
+    ).map(normalizeQuickRetestSchoolRecord);
+    const manualPresets = [];
+    const seen = new Set();
+    for (const preset of rawPresets) {
+      const key = buildPresetDedupKey(preset);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      manualPresets.push(preset);
+      if (manualPresets.length >= MANUAL_PRESET_LIMIT) break;
+    }
+    const quickNewsSchools = [];
+    const quickNewsSeen = new Set();
+    for (const school of rawQuickNewsSchools) {
+      const key = buildQuickRetestSchoolDedupKey(school);
+      if (quickNewsSeen.has(key)) continue;
+      quickNewsSeen.add(key);
+      quickNewsSchools.push(school);
+      if (quickNewsSchools.length >= 10) break;
+    }
+    const quickAdjustmentSchools = [];
+    const quickAdjustmentSeen = new Set();
+    for (const school of rawQuickAdjustmentSchools) {
+      const key = buildQuickRetestSchoolDedupKey(school);
+      if (quickAdjustmentSeen.has(key)) continue;
+      quickAdjustmentSeen.add(key);
+      quickAdjustmentSchools.push(school);
+      if (quickAdjustmentSchools.length >= 10) break;
+    }
+    const quickAdjustmentCleanSchools = [];
+    const quickAdjustmentCleanSeen = new Set();
+    for (const school of rawQuickAdjustmentCleanSchools) {
+      const key = buildAdjustmentCleanQuickDedupKey(school);
+      if (quickAdjustmentCleanSeen.has(key)) continue;
+      quickAdjustmentCleanSeen.add(key);
+      quickAdjustmentCleanSchools.push(school);
+      if (quickAdjustmentCleanSchools.length >= 10) break;
+    }
+    const adjustmentPrioritySchools = [];
+    const prioritySeen = new Set();
+    for (const school of rawAdjustmentPrioritySchools) {
+      const key = buildQuickRetestSchoolDedupKey(school);
+      if (prioritySeen.has(key)) continue;
+      prioritySeen.add(key);
+      adjustmentPrioritySchools.push(school);
+      if (adjustmentPrioritySchools.length >= ADJUSTMENT_PRIORITY_SCHOOL_LIMIT) break;
+    }
+    return {
+      tasks,
+      manualPresets,
+      quickRetestSchools: quickNewsSchools,
+      quickNewsSchools,
+      quickAdjustmentSchools,
+      quickAdjustmentCleanSchools,
+      adjustmentPrioritySchools
     };
   } catch (error) {
     if (retries > 0) {
@@ -563,6 +920,10 @@ async function readConfig(retries = 2) {
 }
 
 async function writeConfig(config) {
+  if (isDatabaseStorageEnabled()) {
+    await writeStorageJson(STORAGE_KEY_CONFIG, config);
+    return;
+  }
   const tmpFile = `${CONFIG_FILE}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   await fsp.writeFile(tmpFile, JSON.stringify(config, null, 2), 'utf8');
   await fsp.rename(tmpFile, CONFIG_FILE);
@@ -3136,6 +3497,38 @@ async function safeHttpPostForm(url, formData = {}, config = {}, maxRedirects = 
   throw new Error(`${sourceLabel}重定向次数超过限制`);
 }
 
+function mergeCookieHeaderValue(baseCookie = '', setCookieHeader = null) {
+  const map = new Map();
+  const applyPair = (pairLike) => {
+    const pair = String(pairLike || '').trim();
+    if (!pair) return;
+    const eqIndex = pair.indexOf('=');
+    if (eqIndex <= 0) return;
+    const key = pair.slice(0, eqIndex).trim();
+    const value = pair.slice(eqIndex + 1).trim();
+    if (!key) return;
+    map.set(key, value);
+  };
+  String(baseCookie || '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => applyPair(item));
+  const setCookieList = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+  setCookieList
+    .filter(Boolean)
+    .forEach((line) => applyPair(String(line).split(';')[0]));
+  return Array.from(map.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join('; ');
+}
+
+function createYanzhaoSessionState() {
+  return {
+    cookieHeader: ''
+  };
+}
+
 function normalizeYanzhaoSchoolRecord(recordLike, fallbackProvince = null) {
   const record = recordLike || {};
   const ssdm = String(record.szssm || record.ssdm || fallbackProvince?.code || '').trim();
@@ -3236,6 +3629,11 @@ function normalizeYanzhaoCatalog(catalogLike) {
 }
 
 async function readYanzhaoCatalog() {
+  if (isDatabaseStorageEnabled()) {
+    const data = await readStorageJson(STORAGE_KEY_YANZHAO_CATALOG, null);
+    if (!data) return null;
+    return normalizeYanzhaoCatalog(data);
+  }
   try {
     const raw = await fsp.readFile(YANZHAO_CATALOG_FILE, 'utf8');
     return normalizeYanzhaoCatalog(JSON.parse(raw));
@@ -3247,6 +3645,10 @@ async function readYanzhaoCatalog() {
 
 async function writeYanzhaoCatalog(catalog) {
   const normalized = normalizeYanzhaoCatalog(catalog);
+  if (isDatabaseStorageEnabled()) {
+    await writeStorageJson(STORAGE_KEY_YANZHAO_CATALOG, normalized);
+    return normalized;
+  }
   const tmpFile = `${YANZHAO_CATALOG_FILE}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmpFile, JSON.stringify(normalized, null, 2), 'utf8');
   await fsp.rename(tmpFile, YANZHAO_CATALOG_FILE);
@@ -3396,6 +3798,10 @@ function runInMajorTestCacheQueue(job) {
 }
 
 async function readAdjustmentMajorTestCache() {
+  if (isDatabaseStorageEnabled()) {
+    const data = await readStorageJson(STORAGE_KEY_ADJUSTMENT_MAJOR_TEST_CACHE, createDefaultAdjustmentMajorTestCacheData());
+    return normalizeAdjustmentMajorTestCache(data);
+  }
   try {
     const raw = await fsp.readFile(ADJUSTMENT_MAJOR_TEST_CACHE_FILE, 'utf8');
     return normalizeAdjustmentMajorTestCache(JSON.parse(raw));
@@ -3409,6 +3815,10 @@ async function readAdjustmentMajorTestCache() {
 
 async function writeAdjustmentMajorTestCache(cacheLike) {
   const cache = normalizeAdjustmentMajorTestCache(cacheLike);
+  if (isDatabaseStorageEnabled()) {
+    await writeStorageJson(STORAGE_KEY_ADJUSTMENT_MAJOR_TEST_CACHE, cache);
+    return cache;
+  }
   const tmpFile = `${ADJUSTMENT_MAJOR_TEST_CACHE_FILE}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmpFile, JSON.stringify(cache, null, 2), 'utf8');
   await fsp.rename(tmpFile, ADJUSTMENT_MAJOR_TEST_CACHE_FILE);
@@ -3519,6 +3929,35 @@ function collectAdjustmentMajorCachedSchools(records, limit = 24) {
     .slice(0, limit);
 }
 
+function collectAdjustmentPrioritySchoolCandidates(records, limit = ADJUSTMENT_PRIORITY_SCHOOL_LIMIT) {
+  const map = new Map();
+  (Array.isArray(records) ? records : []).forEach((record, index) => {
+    const normalized = normalizeQuickRetestSchoolRecord(record);
+    if (!normalized.schoolName) return;
+    const key = buildQuickRetestSchoolDedupKey(normalized);
+    if (!key) return;
+    const baseScore = 2200 - index * 12;
+    const old = map.get(key);
+    if (!old || (old.score || 0) < baseScore) {
+      map.set(key, {
+        schoolName: normalized.schoolName,
+        collegeName: normalized.collegeName || '',
+        includeCollegePages: normalized.includeCollegePages !== false,
+        dwdm: '',
+        ssmc: '',
+        ssdm: '',
+        majorMatches: [],
+        score: baseScore,
+        source: 'priority_list',
+        priority: true
+      });
+    }
+  });
+  return Array.from(map.values())
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, limit);
+}
+
 function collectAdjustmentMajorCachedItems(records, limit = 180, targetYear = '') {
   const map = new Map();
   const year = extractAdjustmentYearText(targetYear || '');
@@ -3574,15 +4013,23 @@ function mergeAdjustmentMajorSchoolCandidates(primarySchools, cachedSchools, lim
     if (!old) {
       map.set(key, {
         schoolName: school.schoolName,
+        collegeName: school.collegeName || '',
+        includeCollegePages: school.includeCollegePages !== false,
         dwdm: String(school.dwdm || '').trim(),
         ssmc: school.ssmc || '',
         ssdm: school.ssdm || '',
         majorMatches: mergeMajorMatchEntries(school.majorMatches, 6),
-        score: cacheScore
+        score: cacheScore,
+        source: school.source || '',
+        priority: Boolean(school.priority)
       });
       return;
     }
     old.score += Math.round(cacheScore * 0.45);
+    if (!old.collegeName && school.collegeName) old.collegeName = school.collegeName;
+    if (typeof old.includeCollegePages !== 'boolean') old.includeCollegePages = school.includeCollegePages !== false;
+    old.source = old.source || school.source || '';
+    old.priority = Boolean(old.priority || school.priority);
     old.majorMatches = mergeMajorMatchEntries([...(old.majorMatches || []), ...(school.majorMatches || [])], 6);
   });
   return Array.from(map.values())
@@ -3777,25 +4224,31 @@ async function getYanzhaoJson(endpoint, sourceLabel = '研招网接口') {
   return payload;
 }
 
-async function postYanzhaoForm(endpoint, formData, sourceLabel = '研招网接口') {
+async function postYanzhaoForm(endpoint, formData, sourceLabel = '研招网接口', options = {}) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const customHeaders = opts.headers && typeof opts.headers === 'object' ? opts.headers : {};
+  const timeout = Math.max(10000, Math.min(60000, Number(opts.timeout) || 40000));
+  const maxRedirects = Math.max(0, Math.min(8, Number(opts.maxRedirects) || 3));
+  const withResponse = normalizeBooleanFlag(opts.withResponse, false);
   const url = `${YANZHAO_BASE_URL}${endpoint}`;
   const { response } = await safeHttpPostForm(
     url,
     formData,
     {
       responseType: 'json',
-      timeout: 40000,
+      timeout,
       headers: {
         'User-Agent': USER_AGENT,
         Accept: 'application/json,text/plain,*/*',
         Referer: `${YANZHAO_BASE_URL}/zsml/`,
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest'
+        'X-Requested-With': 'XMLHttpRequest',
+        ...customHeaders
       },
       validateStatus: (status) => status >= 200 && status < 400
     },
-    3,
+    maxRedirects,
     sourceLabel
   );
   const payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
@@ -3804,6 +4257,32 @@ async function postYanzhaoForm(endpoint, formData, sourceLabel = '研招网接�
   }
   if (payload.flag === false) {
     throw new Error(normalizeText(payload.msg || `${sourceLabel}请求失败`));
+  }
+  if (withResponse) {
+    return { payload, response };
+  }
+  return payload;
+}
+
+async function postYanzhaoFormWithSession(endpoint, formData, sourceLabel, sessionState = null, options = {}) {
+  if (!global.__yanzhaoFormSessionState) {
+    global.__yanzhaoFormSessionState = createYanzhaoSessionState();
+  }
+  const session =
+    sessionState && typeof sessionState === 'object' ? sessionState : global.__yanzhaoFormSessionState;
+  const headers = {
+    ...(options?.headers && typeof options.headers === 'object' ? options.headers : {})
+  };
+  if (session?.cookieHeader) {
+    headers.Cookie = session.cookieHeader;
+  }
+  const { payload, response } = await postYanzhaoForm(endpoint, formData, sourceLabel, {
+    ...options,
+    headers,
+    withResponse: true
+  });
+  if (session) {
+    session.cookieHeader = mergeCookieHeaderValue(session.cookieHeader, response?.headers?.['set-cookie']);
   }
   return payload;
 }
@@ -3820,7 +4299,7 @@ async function fetchYanzhaoSchoolCatalogFromZsml(options = {}) {
       const start = (curPage - 1) * pageSize;
       let resp;
       try {
-        resp = await postYanzhaoForm(
+        resp = await postYanzhaoFormWithSession(
           '/zsml/rs/dws.do',
           {
             dwdm: '',
@@ -3981,7 +4460,7 @@ async function fetchYanzhaoSchoolCatalog(options = {}) {
 }
 
 async function fetchYanzhaoMajorCatalog(options = {}) {
-  const maxPagesPerCategory = Math.max(1, Math.min(16, Number(options.maxPagesPerCategory) || 8));
+  const maxPagesPerCategory = Math.max(1, Math.min(24, Number(options.maxPagesPerCategory) || 12));
   const majorMap = new Map();
   const mlData = await getYanzhaoJson('/zsml/code/ml.json', '研招网学术学位门类');
   const academicMlList = Array.isArray(mlData.dms) ? mlData.dms : [];
@@ -4043,7 +4522,7 @@ async function fetchYanzhaoMajorCatalog(options = {}) {
       const start = (curPage - 1) * pageSize;
       let resp;
       try {
-        resp = await postYanzhaoForm(
+        resp = await postYanzhaoFormWithSession(
           '/zsml/rs/zys.do',
           {
             zydm: '',
@@ -4206,7 +4685,7 @@ async function queryYanzhaoSchoolsByMajor(major, options = {}) {
     const start = (curPage - 1) * pageSize;
     let resp;
     try {
-      resp = await postYanzhaoForm(
+      resp = await postYanzhaoFormWithSession(
         '/zsml/rs/zydws.do',
         {
           zydm: major.zydm,
@@ -4271,6 +4750,8 @@ async function mapWithConcurrency(items, concurrency, worker) {
 
 async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
   const schoolName = String(schoolCandidate?.schoolName || schoolCandidate?.dwmc || '').trim();
+  const collegeName = String(schoolCandidate?.collegeName || '').trim();
+  const includeCollegePages = schoolCandidate?.includeCollegePages !== false;
   const majorKeyword = String(options.majorKeyword || '').trim();
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const keywordMatchers = Array.isArray(options.keywordMatchers) ? options.keywordMatchers : [];
@@ -4282,15 +4763,15 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
       ssmc: '',
       majorMatches: [],
       notices: [],
-      summary: { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0 },
+      summary: { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0, searchFallbackUsed: false, searchFallbackAdded: 0 },
       error: '院校名称为空'
     };
   }
   try {
     const queryResult = await queryGraduateRecentNoticesBySchoolName({
       schoolName,
-      collegeName: '',
-      includeCollegePages: true,
+      collegeName,
+      includeCollegePages,
       focus: 'general'
     });
     const seeds = Array.isArray(queryResult.items) ? queryResult.items.slice(0, maxNoticesPerSchool) : [];
@@ -4354,7 +4835,7 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
         continue;
       }
     }
-    const notices = Array.from(noticeMap.values())
+    let notices = Array.from(noticeMap.values())
       .sort((a, b) => {
         if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
           return b.publishedDate.localeCompare(a.publishedDate);
@@ -4362,6 +4843,76 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
         return (b.relevanceScore || 0) - (a.relevanceScore || 0);
       })
       .slice(0, 24);
+
+    let searchFallbackUsed = false;
+    let searchFallbackAdded = 0;
+    const canUseFallback =
+      normalizeBooleanFlag(options.enableSearchFallback, true) &&
+      notices.length === 0 &&
+      (normalizeBooleanFlag(options.searchFallbackForAll, false) || Boolean(schoolCandidate?.priority));
+    if (canUseFallback) {
+      const budget = options.fallbackBudget && typeof options.fallbackBudget === 'object' ? options.fallbackBudget : null;
+      const hasBudget = !budget || Number(budget.remaining || 0) > 0;
+      if (hasBudget) {
+        if (budget) {
+          budget.remaining = Math.max(0, Number(budget.remaining || 0) - 1);
+        }
+        try {
+          const fallbackResult = await runAdjustmentDataCleaning({
+            schoolName,
+            majorKeyword,
+            targetYear,
+            majorOnly: false,
+            keywords: Array.isArray(options.searchFallbackKeywords) ? options.searchFallbackKeywords : [],
+            sources: Array.isArray(options.searchFallbackSources) ? options.searchFallbackSources : ['yanzhao', 'muchong'],
+            cleaningLevel: 'standard',
+            limit: Math.max(6, Math.min(40, Number(options.searchFallbackLimit) || 14))
+          });
+          const fallbackItems = Array.isArray(fallbackResult?.items) ? fallbackResult.items : [];
+          if (fallbackItems.length) {
+            fallbackItems.forEach((item) => {
+              if (!item?.url || !item?.title) return;
+              const id = `${normalizeUrlForKey(item.url)}::${normalizeMatchText(item.title)}::${normalizeMatchText(schoolName)}`;
+              if (noticeMap.has(id)) return;
+              noticeMap.set(id, {
+                id,
+                schoolName,
+                dwdm: String(schoolCandidate?.dwdm || '').trim(),
+                ssmc: String(schoolCandidate?.ssmc || '').trim(),
+                title: item.title,
+                url: item.url,
+                publishedDate: String(item.publishedDate || '').trim(),
+                dayBucket: 'fallback',
+                dayLabel: '搜索补缺',
+                sourcePage: item.sourceLabel || item.source || '',
+                matchedKeywords: Array.isArray(item.matchedKeywords) ? item.matchedKeywords : [],
+                keywordScore: Number(item.keywordScore || 0),
+                adjustmentHits: Number(item.adjustmentHits || 0),
+                quotaNumbers: Array.isArray(item.quotaNumbers) ? item.quotaNumbers : [],
+                quotaSnippets: Array.isArray(item.quotaSnippets) ? item.quotaSnippets : [],
+                attachments: Array.isArray(item.attachments) ? item.attachments : [],
+                excerpt: String(item.excerpt || '').trim(),
+                relevanceScore: Number(item.relevanceScore || 0) + 12,
+                fromSearchFallback: true
+              });
+            });
+            const merged = Array.from(noticeMap.values())
+              .sort((a, b) => {
+                if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+                  return b.publishedDate.localeCompare(a.publishedDate);
+                }
+                return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+              })
+              .slice(0, 24);
+            searchFallbackUsed = merged.some((item) => item.fromSearchFallback);
+            searchFallbackAdded = merged.filter((item) => item.fromSearchFallback).length;
+            notices = merged;
+          }
+        } catch (error) {
+          // fallback is best-effort
+        }
+      }
+    }
     return {
       schoolName,
       dwdm: String(schoolCandidate?.dwdm || '').trim(),
@@ -4374,7 +4925,9 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
         scanned: seeds.length,
         matched: notices.length,
         withQuota: notices.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
-        withAttachment: notices.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length
+        withAttachment: notices.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length,
+        searchFallbackUsed,
+        searchFallbackAdded
       },
       error: ''
     };
@@ -4399,10 +4952,18 @@ async function runAdjustmentMajorTest(options = {}) {
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const keywords = parseKeywords(options.keywords || '');
   const forceRefresh = normalizeBooleanFlag(options.refreshCatalog, false);
-  const maxSchools = Math.max(1, Math.min(20, Number(options.maxSchools) || 8));
+  const maxSchools = Math.max(1, Math.min(120, Number(options.maxSchools) || 20));
+  const maxPreviewSchools = Math.max(40, Math.min(1200, Number(options.maxPreviewSchools) || 400));
   const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
   const maxMajorCandidates = Math.max(2, Math.min(14, Number(options.maxMajorCandidates) || 8));
   const previewOnly = normalizeBooleanFlag(options.previewOnly, false);
+  const usePrioritySchools = normalizeBooleanFlag(options.usePrioritySchools, true);
+  const enableSearchFallback = normalizeBooleanFlag(options.enableSearchFallback, true);
+  const searchFallbackForAll = normalizeBooleanFlag(options.searchFallbackForAll, false);
+  const searchFallbackLimit = Math.max(6, Math.min(40, Number(options.searchFallbackLimit) || 14));
+  const searchFallbackMaxSchools = Math.max(0, Math.min(30, Number(options.searchFallbackMaxSchools) || 8));
+  const searchFallbackSources = normalizeAdjustmentSources(options.searchFallbackSources || ['yanzhao', 'muchong']);
+  const searchFallbackKeywords = parseKeywords(options.searchFallbackKeywords || '');
   const selectedSchoolKeys = new Set(
     (Array.isArray(options.selectedSchools) ? options.selectedSchools : [])
       .map((value) => normalizeMatchText(value))
@@ -4412,13 +4973,24 @@ async function runAdjustmentMajorTest(options = {}) {
   const cachedRecords = getAdjustmentMajorCacheRecords(cacheStore, majorKeyword, targetYear);
   const cachedSchoolSeeds = collectAdjustmentMajorCachedSchools(cachedRecords, Math.max(maxSchools * 2, 16));
   const cachedItemSeeds = collectAdjustmentMajorCachedItems(cachedRecords, 240, targetYear);
+  const runtimeConfig = await readConfig().catch(() => ({ adjustmentPrioritySchools: [] }));
+  const prioritySchoolSeeds = usePrioritySchools
+    ? collectAdjustmentPrioritySchoolCandidates(runtimeConfig.adjustmentPrioritySchools || [], ADJUSTMENT_PRIORITY_SCHOOL_LIMIT)
+    : [];
+  const supplementSchoolSeeds = [...prioritySchoolSeeds, ...cachedSchoolSeeds];
 
   let catalog;
   try {
     catalog = await getOrRefreshYanzhaoCatalog({ forceRefresh });
   } catch (error) {
     if (cachedItemSeeds.length) {
-      return buildAdjustmentMajorResultFromCacheOnly(options, { exists: false, refreshedAt: '', ageHours: null, schoolCount: 0, majorCount: 0 }, cachedRecords, cachedSchoolSeeds, cachedItemSeeds);
+      return buildAdjustmentMajorResultFromCacheOnly(
+        options,
+        { exists: false, refreshedAt: '', ageHours: null, schoolCount: 0, majorCount: 0 },
+        cachedRecords,
+        supplementSchoolSeeds,
+        cachedItemSeeds
+      );
     }
     throw error;
   }
@@ -4427,7 +4999,13 @@ async function runAdjustmentMajorTest(options = {}) {
   const { picked, hintSet } = pickMatchedMajorCandidates(catalog, majorKeyword, Math.max(maxMajorCandidates * 2, 16));
   if (!picked.length) {
     if (cachedItemSeeds.length) {
-      return buildAdjustmentMajorResultFromCacheOnly(options, buildYanzhaoCatalogStatus(catalog), cachedRecords, cachedSchoolSeeds, cachedItemSeeds);
+      return buildAdjustmentMajorResultFromCacheOnly(
+        options,
+        buildYanzhaoCatalogStatus(catalog),
+        cachedRecords,
+        supplementSchoolSeeds,
+        cachedItemSeeds
+      );
     }
     throw new Error('本地专业库未匹配到相关专业，请先刷新研招网本地库后重试');
   }
@@ -4484,14 +5062,18 @@ async function runAdjustmentMajorTest(options = {}) {
         .slice(0, 5)
     }))
     .sort((a, b) => b.score - a.score || a.schoolName.localeCompare(b.schoolName));
-  let schoolCandidates = mergeAdjustmentMajorSchoolCandidates(primarySchoolCandidates, cachedSchoolSeeds, Math.max(maxSchools, 1));
+  const schoolCandidateLimit = Math.max(
+    previewOnly ? maxPreviewSchools : maxSchools,
+    selectedSchoolKeys.size || 0
+  );
+  let schoolCandidates = mergeAdjustmentMajorSchoolCandidates(primarySchoolCandidates, supplementSchoolSeeds, Math.max(schoolCandidateLimit, 1));
   if (selectedSchoolKeys.size) {
     schoolCandidates = schoolCandidates.filter((school) => selectedSchoolKeys.has(normalizeMatchText(buildAdjustmentMajorSchoolCandidateKey(school))));
   }
 
   if (!schoolCandidates.length) {
     if (cachedItemSeeds.length) {
-      return buildAdjustmentMajorResultFromCacheOnly(options, buildYanzhaoCatalogStatus(catalog), cachedRecords, cachedSchoolSeeds, cachedItemSeeds);
+      return buildAdjustmentMajorResultFromCacheOnly(options, buildYanzhaoCatalogStatus(catalog), cachedRecords, supplementSchoolSeeds, cachedItemSeeds);
     }
     if (majorSchoolErrors.length) {
       throw new Error(`专业院校匹配失败：${majorSchoolErrors.slice(0, 2).join('；')}`);
@@ -4509,7 +5091,14 @@ async function runAdjustmentMajorTest(options = {}) {
         maxSchools,
         maxNoticesPerSchool,
         forceRefresh,
-        previewOnly: true
+        previewOnly: true,
+        usePrioritySchools,
+        enableSearchFallback,
+        searchFallbackForAll,
+        searchFallbackMaxSchools,
+        searchFallbackLimit,
+        searchFallbackSources,
+        searchFallbackKeywords
       },
       catalog: buildYanzhaoCatalogStatus(catalog),
       majorCandidates,
@@ -4523,11 +5112,12 @@ async function runAdjustmentMajorTest(options = {}) {
         totalNotices: 0,
         withQuota: 0,
         withAttachment: 0,
-        cacheAssistSchools: cachedSchoolSeeds.length,
+        cacheAssistSchools: supplementSchoolSeeds.length,
         cacheAssistItems: cachedItemSeeds.length,
         usedCacheFallback: false,
         freshNotices: 0,
-        previewOnly: true
+        previewOnly: true,
+        prioritySchoolSeeds: prioritySchoolSeeds.length
       },
       items: []
     };
@@ -4536,12 +5126,20 @@ async function runAdjustmentMajorTest(options = {}) {
   const keywordMatchers = buildKeywordMatchers(
     Array.from(new Set([...buildMajorKeywordVariants(majorKeyword), ...keywords, '调剂', '名额', '缺额', '复试', '研究生招生']))
   );
-  const schoolResults = await mapWithConcurrency(schoolCandidates.slice(0, maxSchools), 2, async (school) =>
+  const runSchoolLimit = selectedSchoolKeys.size ? Math.min(120, selectedSchoolKeys.size) : maxSchools;
+  const fallbackBudget = { remaining: searchFallbackMaxSchools };
+  const schoolResults = await mapWithConcurrency(schoolCandidates.slice(0, runSchoolLimit), 2, async (school) =>
     runAdjustmentMajorTestForSchool(school, {
       majorKeyword,
       targetYear,
       keywordMatchers,
-      maxNoticesPerSchool
+      maxNoticesPerSchool,
+      enableSearchFallback,
+      searchFallbackForAll,
+      searchFallbackLimit,
+      searchFallbackSources,
+      searchFallbackKeywords,
+      fallbackBudget
     })
   );
   const schools = schoolResults.map((item) => ({
@@ -4581,10 +5179,13 @@ async function runAdjustmentMajorTest(options = {}) {
     totalNotices: finalItems.length,
     withQuota: finalItems.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
     withAttachment: finalItems.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length,
-    cacheAssistSchools: cachedSchoolSeeds.length,
+    cacheAssistSchools: supplementSchoolSeeds.length,
     cacheAssistItems: cachedItemSeeds.length,
     usedCacheFallback,
-    freshNotices: freshItems.length
+    freshNotices: freshItems.length,
+    prioritySchoolSeeds: prioritySchoolSeeds.length,
+    searchFallbackSchools: schools.filter((school) => Boolean(school?.summary?.searchFallbackUsed)).length,
+    searchFallbackNotices: schools.reduce((sum, school) => sum + Math.max(0, Number(school?.summary?.searchFallbackAdded || 0)), 0)
   };
 
   const result = {
@@ -4595,7 +5196,14 @@ async function runAdjustmentMajorTest(options = {}) {
       keywords,
       maxSchools,
       maxNoticesPerSchool,
-      forceRefresh
+      forceRefresh,
+      usePrioritySchools,
+      enableSearchFallback,
+      searchFallbackForAll,
+      searchFallbackMaxSchools,
+      searchFallbackLimit,
+      searchFallbackSources,
+      searchFallbackKeywords
     },
     catalog: buildYanzhaoCatalogStatus(catalog),
     majorCandidates,
@@ -6731,7 +7339,14 @@ app.post('/api/adjustment-major-test/query', async (req, res) => {
       maxNoticesPerSchool: body.maxNoticesPerSchool,
       maxMajorCandidates: body.maxMajorCandidates,
       selectedSchools: body.selectedSchools,
-      previewOnly: body.previewOnly
+      previewOnly: body.previewOnly,
+      usePrioritySchools: body.usePrioritySchools,
+      enableSearchFallback: body.enableSearchFallback,
+      searchFallbackForAll: body.searchFallbackForAll,
+      searchFallbackMaxSchools: body.searchFallbackMaxSchools,
+      searchFallbackLimit: body.searchFallbackLimit,
+      searchFallbackSources: body.searchFallbackSources,
+      searchFallbackKeywords: body.searchFallbackKeywords
     });
     res.json({ ok: true, result });
   } catch (error) {
@@ -7010,6 +7625,87 @@ app.post('/api/graduate-news-batch', async (req, res) => {
     res.json({ ok: true, result });
   } catch (error) {
     res.status(400).json({ error: error.message || '固定院校查询失败' });
+  }
+});
+
+app.get('/api/adjustment-priority-schools', async (_, res) => {
+  const config = await readConfig();
+  res.json({ schools: config.adjustmentPrioritySchools || [] });
+});
+
+app.post('/api/adjustment-priority-schools', async (req, res) => {
+  const school = normalizeQuickRetestSchoolRecord(req.body || {});
+  if (!school.schoolName) {
+    return res.status(400).json({ error: 'School name is required' });
+  }
+  const schools = await mutateConfig(async (config) => {
+    config.adjustmentPrioritySchools = upsertQuickSchoolRecords(config.adjustmentPrioritySchools || [], school, ADJUSTMENT_PRIORITY_SCHOOL_LIMIT);
+    return config.adjustmentPrioritySchools;
+  });
+  res.json({ ok: true, schools });
+});
+
+app.post('/api/adjustment-priority-schools/delete-many', async (req, res) => {
+  const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  if (!ids.length) {
+    return res.status(400).json({ error: 'ids is required' });
+  }
+  try {
+    const result = await mutateConfig(async (config) => {
+      const before = (config.adjustmentPrioritySchools || []).length;
+      config.adjustmentPrioritySchools = (config.adjustmentPrioritySchools || []).filter((x) => !ids.includes(x.id));
+      if (config.adjustmentPrioritySchools.length === before) {
+        throw createHttpError(404, 'No matching records found');
+      }
+      return {
+        deleted: before - config.adjustmentPrioritySchools.length,
+        schools: config.adjustmentPrioritySchools
+      };
+    });
+    res.json({ ok: true, deleted: result.deleted, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Failed to delete priority schools' });
+  }
+});
+
+app.delete('/api/adjustment-priority-schools/:id', async (req, res) => {
+  const id = String(req.params.id || '').trim();
+  try {
+    const schools = await mutateConfig(async (config) => {
+      const before = (config.adjustmentPrioritySchools || []).length;
+      config.adjustmentPrioritySchools = (config.adjustmentPrioritySchools || []).filter((x) => x.id !== id);
+      if (config.adjustmentPrioritySchools.length === before) {
+        throw createHttpError(404, 'Record not found');
+      }
+      return config.adjustmentPrioritySchools;
+    });
+    res.json({ ok: true, schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Failed to delete priority school' });
+  }
+});
+
+app.post('/api/adjustment-priority-schools/sync', async (req, res) => {
+  try {
+    const result = await mutateConfig(async (config) => {
+      const source = Array.isArray(config.quickAdjustmentSchools) ? config.quickAdjustmentSchools : [];
+      if (!source.length) {
+        throw createHttpError(400, 'quickAdjustmentSchools is empty');
+      }
+      const before = Array.isArray(config.adjustmentPrioritySchools) ? config.adjustmentPrioritySchools.length : 0;
+      config.adjustmentPrioritySchools = mergeQuickSchoolRecords(
+        config.adjustmentPrioritySchools || [],
+        source,
+        ADJUSTMENT_PRIORITY_SCHOOL_LIMIT
+      );
+      return {
+        syncedCount: Math.max(0, config.adjustmentPrioritySchools.length - before),
+        schools: config.adjustmentPrioritySchools
+      };
+    });
+    res.json({ ok: true, syncedCount: result.syncedCount, schools: result.schools });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Failed to sync priority schools' });
   }
 });
 
@@ -7425,7 +8121,17 @@ app.get('/api/files/:name', (req, res) => {
 });
 
 app.get('/api/health', (_, res) => {
-  res.json({ ok: true, now: nowIsoSafe() });
+  const storagePath = isSqliteStorageEnabled()
+    ? SQLITE_DB_FILE
+    : isMySqlStorageEnabled()
+      ? `${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}`
+      : DATA_DIR;
+  res.json({
+    ok: true,
+    now: nowIsoSafe(),
+    storageBackend: STORAGE_BACKEND,
+    storagePath
+  });
 });
 
 async function bootstrap() {

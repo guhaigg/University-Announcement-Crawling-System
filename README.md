@@ -277,6 +277,45 @@ npm run readme:update
 - `npm run readme:update`：只刷新 README 的自动审核记录
 - 已配置 `postcheck`，每次 `npm run check` 后会自动更新本 README 的“自动审核记录”
 
+## 2026-03-14 19:40 (+08:00) 更新记录（数据库）
+
+- 更新内容
+  - 新增可选 SQLite 存储后端，支持把 `config/users/yanzhao_catalog/adjustment_major_test_cache` 统一存入数据库。
+  - 保留 JSON 作为默认后端，现有部署不改环境变量可继续使用。
+  - 健康检查接口新增存储信息返回，便于确认当前是否已切换数据库。
+- 修改情况
+  - 后端文件：`server.js`
+  - 兼容性：向后兼容，默认行为不变；只在显式设置 `STORAGE_BACKEND=sqlite` 时启用数据库。
+  - 数据迁移：首次启用 SQLite 时会自动把 `data/*.json` 现有数据导入 `data/app.db`（仅在数据库里缺失该键时导入）。
+- 使用方法
+  1. 在启动前设置环境变量：`STORAGE_BACKEND=sqlite`
+  2. 可选设置数据库文件：`STORAGE_SQLITE_FILE=app.db`（默认 `data/app.db`）
+  3. 启动服务后访问 `/api/health`，确认 `storageBackend` 为 `sqlite`
+  4. 回滚方式：去掉 `STORAGE_BACKEND`（或设为 `json`）后重启即可
+
+## 2026-03-14 19:55 (+08:00) 更新记录（MySQL 部署）
+
+- 更新内容
+  - 新增 `MySQL` 存储后端：`STORAGE_BACKEND=mysql`。
+  - 增加 MySQL 一键脚本：`scripts/mysql-start.ps1`、`scripts/mysql-stop.ps1`、`scripts/mysql-bootstrap.ps1`。
+  - 健康检查接口 `/api/health` 支持返回 MySQL 连接目标（host:port/database）。
+- 修改情况
+  - 后端文件：`server.js`
+  - 脚本文件：`scripts/mysql-start.ps1`、`scripts/mysql-stop.ps1`、`scripts/mysql-bootstrap.ps1`
+  - 配置文件：`.gitignore`（忽略 MySQL 运行时数据目录与 PID）
+- 使用方法
+  1. 启动 MySQL：`powershell -ExecutionPolicy Bypass -File .\\scripts\\mysql-start.ps1`
+  2. 初始化库与账号：`powershell -ExecutionPolicy Bypass -File .\\scripts\\mysql-bootstrap.ps1`
+  3. 配置服务环境变量后启动项目：
+     - `STORAGE_BACKEND=mysql`
+     - `MYSQL_HOST=127.0.0.1`
+     - `MYSQL_PORT=3306`
+     - `MYSQL_USER=codex_app`
+     - `MYSQL_PASSWORD=你的密码`
+     - `MYSQL_DATABASE=codex_yz`
+  4. 访问 `/api/health`，确认 `storageBackend` 为 `mysql`
+  5. 停止 MySQL：`powershell -ExecutionPolicy Bypass -File .\\scripts\\mysql-stop.ps1`
+
 ## CI
 
 GitHub Actions 已配置：
@@ -308,9 +347,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-14 18:33:15（Asia/Shanghai）
+- 最近审核时间：2026-03-14 19:34:14（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：codex/uacs-maintenance-20260314
-- 最近提交：2971c1f chore: 保存当前可用版本
+- 最近提交：71a8dd4 feat: 完成首页去重与专业院校勾选测试流程
 - 当前工作区变更数：0
 <!-- AUTO_REVIEW_END -->
