@@ -811,11 +811,7 @@ function buildPresetDedupKey(presetLike) {
 
 function buildQuickRetestSchoolDedupKey(recordLike) {
   const record = normalizeQuickRetestSchoolRecord(recordLike);
-  return [
-    normalizeMatchText(record.schoolName || ''),
-    normalizeMatchText(record.collegeName || ''),
-    record.includeCollegePages ? '1' : '0'
-  ].join('::');
+  return normalizeMatchText(record.schoolName || '');
 }
 
 function buildAdjustmentCleanQuickDedupKey(recordLike) {
@@ -3153,6 +3149,56 @@ function normalizeYanzhaoSchoolRecord(recordLike, fallbackProvince = null) {
   };
 }
 
+function buildYanzhaoSchoolDedupKey(schoolLike) {
+  const school = schoolLike || {};
+  const dwdm = String(school.dwdm || '').trim();
+  if (dwdm) return dwdm;
+  const schId = String(school.schId || '').trim();
+  if (schId) return `sch:${schId}`;
+  return normalizeMatchText(school.dwmc || '');
+}
+
+function upsertYanzhaoSchoolRecord(schoolMap, recordLike, fallbackProvince = null) {
+  const school = normalizeYanzhaoSchoolRecord(recordLike, fallbackProvince);
+  if (!school.dwmc) return false;
+  const key = buildYanzhaoSchoolDedupKey(school);
+  if (!key) return false;
+  const old = schoolMap.get(key);
+  if (!old) {
+    schoolMap.set(key, school);
+    return true;
+  }
+  schoolMap.set(key, {
+    ...old,
+    ...school,
+    schId: old.schId || school.schId,
+    dwdm: old.dwdm || school.dwdm,
+    dwmc: old.dwmc || school.dwmc,
+    ssdm: old.ssdm || school.ssdm,
+    ssmc: old.ssmc || school.ssmc,
+    zone: old.zone || school.zone
+  });
+  return false;
+}
+
+function sortYanzhaoSchools(listLike) {
+  const list = Array.isArray(listLike) ? listLike : [];
+  return list.sort((a, b) => {
+    if (a.ssdm !== b.ssdm) return a.ssdm.localeCompare(b.ssdm);
+    return (a.dwdm || a.dwmc).localeCompare(b.dwdm || b.dwmc);
+  });
+}
+
+function mergeYanzhaoSchoolLists(...schoolLists) {
+  const schoolMap = new Map();
+  schoolLists.forEach((list) => {
+    (Array.isArray(list) ? list : []).forEach((item) => {
+      upsertYanzhaoSchoolRecord(schoolMap, item);
+    });
+  });
+  return sortYanzhaoSchools(Array.from(schoolMap.values()));
+}
+
 function normalizeYanzhaoMajorRecord(recordLike, fallback = {}) {
   const record = recordLike || {};
   return {
@@ -3538,6 +3584,11 @@ function mergeAdjustmentMajorSchoolCandidates(primarySchools, cachedSchools, lim
     .slice(0, limit);
 }
 
+function buildAdjustmentMajorSchoolCandidateKey(schoolLike) {
+  const school = schoolLike || {};
+  return String(school.dwdm || '').trim() || normalizeMatchText(school.schoolName || school.dwmc || '');
+}
+
 function mergeAdjustmentMajorItemsWithCache(freshItems, cachedItems, limit = 220) {
   const map = new Map();
   (Array.isArray(freshItems) ? freshItems : []).forEach((item) => {
@@ -3716,7 +3767,7 @@ async function postYanzhaoForm(endpoint, formData, sourceLabel = '研招网接�
   return payload;
 }
 
-async function fetchYanzhaoSchoolCatalog(options = {}) {
+async function fetchYanzhaoSchoolCatalogFromZsml(options = {}) {
   const maxPagesPerProvince = Math.max(1, Math.min(45, Number(options.maxPagesPerProvince) || 25));
   const schoolMap = new Map();
 
@@ -3753,27 +3804,111 @@ async function fetchYanzhaoSchoolCatalog(options = {}) {
       totalPage = Math.max(1, Number(msg.totalPage) || totalPage);
       pageSize = Math.max(1, Number(msg.pageCount) || pageSize);
       for (const raw of list) {
-        const school = normalizeYanzhaoSchoolRecord(raw, province);
-        if (!school.dwmc) continue;
-        const key = school.dwdm || normalizeMatchText(school.dwmc);
-        if (!key) continue;
-        const old = schoolMap.get(key);
-        if (!old) {
-          schoolMap.set(key, school);
-          continue;
-        }
-        if ((!old.schId && school.schId) || (!old.sign && school.sign)) {
-          schoolMap.set(key, { ...old, ...school });
-        }
+        upsertYanzhaoSchoolRecord(schoolMap, raw, province);
       }
       if (!list.length) break;
       curPage += 1;
     }
   }
-  return Array.from(schoolMap.values()).sort((a, b) => {
-    if (a.ssdm !== b.ssdm) return a.ssdm.localeCompare(b.ssdm);
-    return (a.dwdm || a.dwmc).localeCompare(b.dwdm || b.dwmc);
-  });
+  return sortYanzhaoSchools(Array.from(schoolMap.values()));
+}
+
+async function fetchYanzhaoSchoolCatalogFromSchSite(options = {}) {
+  const pageSize = 20;
+  const maxPages = Math.max(1, Math.min(120, Number(options.maxSchPages) || 80));
+  const schoolMap = new Map();
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const start = page * pageSize;
+    let html = '';
+    try {
+      const result = await safeHttpGetHtml(`${YANZHAO_BASE_URL}/sch/?start=${start}`, `研招网院校库分页(start=${start})`);
+      html = result.html || '';
+    } catch (error) {
+      if (page === 0) throw error;
+      break;
+    }
+    const $ = cheerio.load(html || '');
+    const items = $('.sch-list-container .sch-item');
+    if (!items.length) break;
+
+    items.each((_idx, node) => {
+      const item = $(node);
+      const nameNode = item.find('.sch-title a.name').first();
+      const schoolName = normalizeText(nameNode.text() || '');
+      if (!schoolName) return;
+      const detailHref = String(nameNode.attr('href') || '').trim();
+      const schIdMatch = detailHref.match(/schId-(\d+)/i);
+      const schId = schIdMatch ? String(schIdMatch[1] || '').trim() : '';
+      const noticeHref = String(item.find('.sch-link a[href*="/sswbgg/?"]').first().attr('href') || '').trim();
+      let dwdm = '';
+      let ssdm = '';
+      if (noticeHref) {
+        try {
+          const noticeUrl = new URL(noticeHref, YANZHAO_BASE_URL);
+          dwdm = String(noticeUrl.searchParams.get('dwdm') || '').trim();
+          ssdm = String(noticeUrl.searchParams.get('ssdm') || '').trim();
+        } catch (error) {
+          dwdm = '';
+          ssdm = '';
+        }
+      }
+      const departmentText = normalizeText(item.find('.sch-department').text() || '');
+      const provinceName = normalizeText((departmentText.split('主管部门')[0] || '').replace(/[：:]/g, ''));
+      const province =
+        YANZHAO_PROVINCE_LIST.find((entry) => entry.code === ssdm) ||
+        YANZHAO_PROVINCE_LIST.find((entry) => normalizeMatchText(entry.name) === normalizeMatchText(provinceName));
+      const tagsText = normalizeText(
+        item
+          .find('.sch-tag')
+          .map((_tagIdx, tagEl) => $(tagEl).text())
+          .get()
+          .join(' ')
+      );
+      upsertYanzhaoSchoolRecord(schoolMap, {
+        schId: schId || dwdm,
+        dwdm,
+        dwmc: schoolName,
+        ssdm: ssdm || String(province?.code || '').trim(),
+        ssmc: normalizeText(province?.name || provinceName || ''),
+        zone: String(province?.zone || '').trim(),
+        zhx: /自划线/.test(`${departmentText} ${tagsText}`),
+        bs: /研究生院/.test(`${departmentText} ${tagsText}`),
+        syl: /(双一流|985|211)/.test(`${departmentText} ${tagsText}`),
+        sign: '',
+        sign2: ''
+      });
+    });
+
+    if (items.length < pageSize) break;
+  }
+
+  return sortYanzhaoSchools(Array.from(schoolMap.values()));
+}
+
+async function fetchYanzhaoSchoolCatalog(options = {}) {
+  const source = String(options.schoolSource || '').trim().toLowerCase();
+  const minSchoolCount = Math.max(100, Math.min(2000, Number(options.minSchoolCount) || 500));
+  const preferSch = source !== 'zsml';
+  let schoolsFromSch = [];
+  let schError = null;
+
+  if (preferSch) {
+    try {
+      schoolsFromSch = await fetchYanzhaoSchoolCatalogFromSchSite(options);
+      if (schoolsFromSch.length >= minSchoolCount || source === 'sch') {
+        return schoolsFromSch;
+      }
+    } catch (error) {
+      schError = error;
+    }
+  }
+
+  const schoolsFromZsml = await fetchYanzhaoSchoolCatalogFromZsml(options);
+  const merged = mergeYanzhaoSchoolLists(schoolsFromSch, schoolsFromZsml);
+  if (merged.length) return merged;
+  if (schError) throw schError;
+  return schoolsFromZsml;
 }
 
 async function fetchYanzhaoMajorCatalog(options = {}) {
@@ -3885,7 +4020,18 @@ async function fetchYanzhaoMajorCatalog(options = {}) {
 }
 
 async function refreshYanzhaoCatalog(options = {}) {
-  const [schools, majors] = await Promise.all([fetchYanzhaoSchoolCatalog(options), fetchYanzhaoMajorCatalog(options)]);
+  const existingCatalog = await readYanzhaoCatalog();
+  const schools = await fetchYanzhaoSchoolCatalog(options);
+  let majors = [];
+  try {
+    majors = await fetchYanzhaoMajorCatalog(options);
+    majors = Array.isArray(majors) ? majors : [];
+  } catch (error) {
+    majors = Array.isArray(existingCatalog?.majors) ? existingCatalog.majors : [];
+    if (!majors.length) {
+      throw error instanceof Error ? error : new Error(String(error || '专业库刷新失败'));
+    }
+  }
   const now = nowIsoSafe();
   const catalog = {
     version: 1,
@@ -4185,6 +4331,12 @@ async function runAdjustmentMajorTest(options = {}) {
   const maxSchools = Math.max(1, Math.min(20, Number(options.maxSchools) || 8));
   const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
   const maxMajorCandidates = Math.max(2, Math.min(14, Number(options.maxMajorCandidates) || 8));
+  const previewOnly = normalizeBooleanFlag(options.previewOnly, false);
+  const selectedSchoolKeys = new Set(
+    (Array.isArray(options.selectedSchools) ? options.selectedSchools : [])
+      .map((value) => normalizeMatchText(value))
+      .filter(Boolean)
+  );
   const cacheStore = await readAdjustmentMajorTestCache().catch(() => normalizeAdjustmentMajorTestCache({ records: [] }));
   const cachedRecords = getAdjustmentMajorCacheRecords(cacheStore, majorKeyword, targetYear);
   const cachedSchoolSeeds = collectAdjustmentMajorCachedSchools(cachedRecords, Math.max(maxSchools * 2, 16));
@@ -4261,7 +4413,10 @@ async function runAdjustmentMajorTest(options = {}) {
         .slice(0, 5)
     }))
     .sort((a, b) => b.score - a.score || a.schoolName.localeCompare(b.schoolName));
-  const schoolCandidates = mergeAdjustmentMajorSchoolCandidates(primarySchoolCandidates, cachedSchoolSeeds, Math.max(maxSchools, 1));
+  let schoolCandidates = mergeAdjustmentMajorSchoolCandidates(primarySchoolCandidates, cachedSchoolSeeds, Math.max(maxSchools, 1));
+  if (selectedSchoolKeys.size) {
+    schoolCandidates = schoolCandidates.filter((school) => selectedSchoolKeys.has(normalizeMatchText(buildAdjustmentMajorSchoolCandidateKey(school))));
+  }
 
   if (!schoolCandidates.length) {
     if (cachedItemSeeds.length) {
@@ -4271,6 +4426,40 @@ async function runAdjustmentMajorTest(options = {}) {
       throw new Error(`专业院校匹配失败：${majorSchoolErrors.slice(0, 2).join('；')}`);
     }
     throw new Error('未找到开设该专业的院校，建议换一个专业关键词重试');
+  }
+
+  if (previewOnly) {
+    return {
+      checkedAt: nowIsoSafe(),
+      query: {
+        majorKeyword,
+        targetYear,
+        keywords,
+        maxSchools,
+        maxNoticesPerSchool,
+        forceRefresh,
+        previewOnly: true
+      },
+      catalog: buildYanzhaoCatalogStatus(catalog),
+      majorCandidates,
+      schoolCandidates,
+      schools: [],
+      summary: {
+        schoolsFromCatalog: schoolCandidates.length,
+        schoolsScanned: 0,
+        schoolsWithResult: 0,
+        failedSchools: 0,
+        totalNotices: 0,
+        withQuota: 0,
+        withAttachment: 0,
+        cacheAssistSchools: cachedSchoolSeeds.length,
+        cacheAssistItems: cachedItemSeeds.length,
+        usedCacheFallback: false,
+        freshNotices: 0,
+        previewOnly: true
+      },
+      items: []
+    };
   }
 
   const keywordMatchers = buildKeywordMatchers(
@@ -6469,7 +6658,9 @@ app.post('/api/adjustment-major-test/query', async (req, res) => {
       refreshCatalog: body.refreshCatalog,
       maxSchools: body.maxSchools,
       maxNoticesPerSchool: body.maxNoticesPerSchool,
-      maxMajorCandidates: body.maxMajorCandidates
+      maxMajorCandidates: body.maxMajorCandidates,
+      selectedSchools: body.selectedSchools,
+      previewOnly: body.previewOnly
     });
     res.json({ ok: true, result });
   } catch (error) {
