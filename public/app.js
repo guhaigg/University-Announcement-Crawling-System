@@ -133,6 +133,13 @@ const adjustmentMajorTestMaxNotices = document.getElementById('adjustment-major-
 const adjustmentMajorTestMaxMajors = document.getElementById('adjustment-major-test-max-majors');
 const adjustmentMajorTestRefreshBeforeRun = document.getElementById('adjustment-major-test-refresh-before-run');
 const adjustmentMajorTestUsePriority = document.getElementById('adjustment-major-test-use-priority');
+const adjustmentMajorAdvancedDetails = document.getElementById('adjustment-major-advanced-details');
+const adjustmentMajorTestEnableSearchFallback = document.getElementById('adjustment-major-test-enable-search-fallback');
+const adjustmentMajorTestSearchFallbackForAll = document.getElementById('adjustment-major-test-search-fallback-for-all');
+const adjustmentMajorTestSearchFallbackMaxSchools = document.getElementById('adjustment-major-test-search-fallback-max-schools');
+const adjustmentMajorTestSearchFallbackLimit = document.getElementById('adjustment-major-test-search-fallback-limit');
+const adjustmentMajorTestSearchFallbackSources = document.getElementById('adjustment-major-test-search-fallback-sources');
+const adjustmentMajorTestSearchFallbackKeywords = document.getElementById('adjustment-major-test-search-fallback-keywords');
 const adjustmentMajorTestMatchBtn = document.getElementById('adjustment-major-test-match-btn');
 const adjustmentMajorTestRunBtn = document.getElementById('adjustment-major-test-run-btn');
 const adjustmentMajorTestExportBtn = document.getElementById('adjustment-major-test-export-btn');
@@ -148,6 +155,10 @@ const adjustmentPriorityList = document.getElementById('adjustment-priority-list
 const adjustmentMajorTestSchoolPicker = document.getElementById('adjustment-major-test-school-picker');
 const adjustmentMajorTestSchoolPickerSummary = document.getElementById('adjustment-major-test-school-picker-summary');
 const adjustmentMajorTestSchoolPickerList = document.getElementById('adjustment-major-test-school-picker-list');
+const adjustmentMajorTestSchoolFilterRegion = document.getElementById('adjustment-major-test-school-filter-region');
+const adjustmentMajorTestSchoolFilterSource = document.getElementById('adjustment-major-test-school-filter-source');
+const adjustmentMajorTestSchoolFilterKeyword = document.getElementById('adjustment-major-test-school-filter-keyword');
+const adjustmentMajorTestSchoolFilterReset = document.getElementById('adjustment-major-test-school-filter-reset');
 const adjustmentMajorTestPickAllBtn = document.getElementById('adjustment-major-test-pick-all');
 const adjustmentMajorTestPickInvertBtn = document.getElementById('adjustment-major-test-pick-invert');
 const adjustmentMajorTestResult = document.getElementById('adjustment-major-test-result');
@@ -162,6 +173,13 @@ const adjustmentMajorTestSelectAll = document.getElementById('adjustment-major-t
 const adjustmentMajorTestInvert = document.getElementById('adjustment-major-test-invert');
 const adjustmentMajorTestList = document.getElementById('adjustment-major-test-list');
 const adjustmentMajorTestPager = document.getElementById('adjustment-major-test-pager');
+const majorWorkbenchTabs = document.getElementById('major-workbench-tabs');
+const majorPaneQuery = document.getElementById('major-pane-query');
+const majorPanePriority = document.getElementById('major-pane-priority');
+const majorPaneCache = document.getElementById('major-pane-cache');
+const adjustmentMajorMonitorMode = document.getElementById('adjustment-major-monitor-mode');
+const adjustmentMajorMonitorStats = document.getElementById('adjustment-major-monitor-stats');
+const adjustmentMajorMonitorLog = document.getElementById('adjustment-major-monitor-log');
 const adjustmentMajorCacheSummary = document.getElementById('adjustment-major-cache-summary');
 const adjustmentMajorCacheMajorFilter = document.getElementById('adjustment-major-cache-major-filter');
 const adjustmentMajorCacheKeepCount = document.getElementById('adjustment-major-cache-keep-count');
@@ -209,10 +227,12 @@ let adjustmentMajorTestSchoolCandidates = [];
 let adjustmentMajorTestSelectedSchoolKeys = new Set();
 let adjustmentMajorTestPreviewSignature = '';
 let adjustmentMajorTestPreviewMeta = null;
+let adjustmentMajorActivePane = 'query';
 let adjustmentMajorCacheState = null;
 let adjustmentPrioritySchools = [];
 let adjustmentPriorityBuiltinRuleCount = 50;
 let editingAdjustmentPriorityId = '';
+const adjustmentMajorMonitorLogs = [];
 let adjustmentCleanQuickSchools = [];
 let newsQuickSchools = [];
 let adjustmentQuickSchools = [];
@@ -400,6 +420,93 @@ function normalizeFilterText(text) {
   return String(text || '')
     .toLowerCase()
     .replace(/\s+/g, '');
+}
+
+function parseSimpleKeywords(text) {
+  return String(text || '')
+    .split(/[,\n，；;]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function formatMonitorTs() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  const s = String(now.getSeconds()).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+function renderAdjustmentMajorMonitorLogs() {
+  if (!adjustmentMajorMonitorLog) return;
+  if (!adjustmentMajorMonitorLogs.length) {
+    adjustmentMajorMonitorLog.innerHTML = '<li><strong>待机</strong>尚未执行任务</li>';
+    return;
+  }
+  adjustmentMajorMonitorLog.innerHTML = adjustmentMajorMonitorLogs
+    .slice()
+    .reverse()
+    .map((item) => {
+      const level = String(item.level || 'info');
+      const levelLabel =
+        level === 'error' ? '错误' : level === 'warn' ? '警告' : level === 'success' ? '完成' : '状态';
+      return `<li class="monitor-${escapeHtml(level)}"><strong>[${escapeHtml(levelLabel)}] ${escapeHtml(
+        item.ts
+      )}</strong>${escapeHtml(item.message)}</li>`;
+    })
+    .join('');
+}
+
+function logToMonitor(level, message) {
+  const safeLevel = ['info', 'success', 'warn', 'error'].includes(String(level || '')) ? String(level) : 'info';
+  const text = String(message || '').trim();
+  if (!text) return;
+  adjustmentMajorMonitorLogs.push({ ts: formatMonitorTs(), level: safeLevel, message: text });
+  while (adjustmentMajorMonitorLogs.length > 24) {
+    adjustmentMajorMonitorLogs.shift();
+  }
+  renderAdjustmentMajorMonitorLogs();
+}
+
+function notifyAndLog(level, message, isError = null) {
+  const safeLevel = ['info', 'success', 'warn', 'error'].includes(String(level || '')) ? String(level) : 'info';
+  const text = String(message || '').trim();
+  if (!text) return;
+  const toastIsError = typeof isError === 'boolean' ? isError : safeLevel === 'error';
+  showToast(text, toastIsError);
+  logToMonitor(safeLevel, text);
+}
+
+function setAdjustmentMajorMonitorMode(text) {
+  if (!adjustmentMajorMonitorMode) return;
+  adjustmentMajorMonitorMode.textContent = `状态：${String(text || '待执行')}`;
+}
+
+function setAdjustmentMajorMonitorStats(summaryLike) {
+  if (!adjustmentMajorMonitorStats) return;
+  const summary = summaryLike || {};
+  adjustmentMajorMonitorStats.textContent = `命中 ${summary.totalNotices || 0} 条 | 成功 ${summary.schoolsWithResult || 0} 校 | 失败 ${summary.failedSchools || 0} 校`;
+}
+
+function switchMajorPane(pane) {
+  const next = ['query', 'priority', 'cache'].includes(String(pane || '')) ? String(pane) : 'query';
+  adjustmentMajorActivePane = next;
+  const paneMap = {
+    query: majorPaneQuery,
+    priority: majorPanePriority,
+    cache: majorPaneCache
+  };
+  Object.entries(paneMap).forEach(([key, el]) => {
+    if (!el) return;
+    el.classList.toggle('hidden', key !== next);
+    el.classList.toggle('active', key === next);
+  });
+  if (majorWorkbenchTabs) {
+    majorWorkbenchTabs.querySelectorAll('button[data-major-pane]').forEach((btn) => {
+      const active = btn.dataset.majorPane === next;
+      btn.classList.toggle('active', active);
+    });
+  }
 }
 
 function ensurePagerState(key) {
@@ -851,6 +958,8 @@ function focusAdjustmentMajorPickerSchoolByName(schoolName) {
 }
 
 function collectAdjustmentMajorTestPayload() {
+  const fallbackSources = parseSimpleKeywords(adjustmentMajorTestSearchFallbackSources?.value || '');
+  const fallbackKeywords = parseSimpleKeywords(adjustmentMajorTestSearchFallbackKeywords?.value || '');
   return {
     majorKeyword: String(adjustmentMajorTestMajor?.value || '').trim(),
     targetYear: String(adjustmentMajorTestYear?.value || '').trim(),
@@ -859,7 +968,13 @@ function collectAdjustmentMajorTestPayload() {
     maxNoticesPerSchool: Number(adjustmentMajorTestMaxNotices?.value || 14),
     maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 16),
     refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked),
-    usePrioritySchools: adjustmentMajorTestUsePriority ? Boolean(adjustmentMajorTestUsePriority.checked) : true
+    usePrioritySchools: adjustmentMajorTestUsePriority ? Boolean(adjustmentMajorTestUsePriority.checked) : true,
+    enableSearchFallback: adjustmentMajorTestEnableSearchFallback ? Boolean(adjustmentMajorTestEnableSearchFallback.checked) : true,
+    searchFallbackForAll: adjustmentMajorTestSearchFallbackForAll ? Boolean(adjustmentMajorTestSearchFallbackForAll.checked) : false,
+    searchFallbackMaxSchools: Number(adjustmentMajorTestSearchFallbackMaxSchools?.value || 8),
+    searchFallbackLimit: Number(adjustmentMajorTestSearchFallbackLimit?.value || 14),
+    searchFallbackSources: fallbackSources.length ? fallbackSources : ['yanzhao', 'muchong'],
+    searchFallbackKeywords: fallbackKeywords
   };
 }
 
@@ -869,9 +984,16 @@ function buildAdjustmentMajorTestPreviewSignature(payload) {
     targetYear: String(payload?.targetYear || '').trim(),
     keywords: String(payload?.keywords || '').trim(),
     maxSchools: Number(payload?.maxSchools || 0),
+    maxNoticesPerSchool: Number(payload?.maxNoticesPerSchool || 0),
     maxMajorCandidates: Number(payload?.maxMajorCandidates || 0),
     refreshCatalog: Boolean(payload?.refreshCatalog),
-    usePrioritySchools: Boolean(payload?.usePrioritySchools)
+    usePrioritySchools: Boolean(payload?.usePrioritySchools),
+    enableSearchFallback: Boolean(payload?.enableSearchFallback),
+    searchFallbackForAll: Boolean(payload?.searchFallbackForAll),
+    searchFallbackMaxSchools: Number(payload?.searchFallbackMaxSchools || 0),
+    searchFallbackLimit: Number(payload?.searchFallbackLimit || 0),
+    searchFallbackSources: Array.isArray(payload?.searchFallbackSources) ? payload.searchFallbackSources : [],
+    searchFallbackKeywords: Array.isArray(payload?.searchFallbackKeywords) ? payload.searchFallbackKeywords : []
   });
 }
 
@@ -902,11 +1024,81 @@ function formatAdjustmentMajorPrimaryBase(summaryLike) {
   return `${base} 所（${name}）`;
 }
 
+function getAdjustmentMajorSchoolSourceType(school) {
+  if (school?.priority) return 'priority';
+  if (school?.source === 'cache') return 'cache';
+  return 'catalog';
+}
+
+function getAdjustmentMajorSchoolSourceLabel(school) {
+  const sourceType = getAdjustmentMajorSchoolSourceType(school);
+  if (sourceType === 'priority') return '重点白名单';
+  if (sourceType === 'cache') return '历史缓存';
+  return '目录匹配';
+}
+
+function applyAdjustmentMajorSchoolPickerFilters() {
+  const region = String(adjustmentMajorTestSchoolFilterRegion?.value || '').trim();
+  const source = String(adjustmentMajorTestSchoolFilterSource?.value || '').trim();
+  const keyword = normalizeFilterText(adjustmentMajorTestSchoolFilterKeyword?.value || '');
+  return adjustmentMajorTestSchoolCandidates.filter((school) => {
+    if (region && String(school?.ssmc || '').trim() !== region) return false;
+    if (source && getAdjustmentMajorSchoolSourceType(school) !== source) return false;
+    if (keyword) {
+      const haystack = normalizeFilterText(
+        `${school?.schoolName || school?.dwmc || ''} ${school?.dwdm || ''} ${
+          (Array.isArray(school?.majorMatches) ? school.majorMatches : [])
+            .map((item) => `${item?.zymc || ''} ${item?.zydm || ''}`)
+            .join(' ')
+        }`
+      );
+      if (!haystack.includes(keyword)) return false;
+    }
+    return true;
+  });
+}
+
+function updateAdjustmentMajorSchoolFilterOptions() {
+  if (!adjustmentMajorTestSchoolFilterRegion) return;
+  const current = String(adjustmentMajorTestSchoolFilterRegion.value || '').trim();
+  const regions = Array.from(
+    new Set(
+      adjustmentMajorTestSchoolCandidates
+        .map((school) => String(school?.ssmc || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  adjustmentMajorTestSchoolFilterRegion.innerHTML = '<option value="">全部地区</option>';
+  regions.forEach((region) => {
+    const option = document.createElement('option');
+    option.value = region;
+    option.textContent = region;
+    adjustmentMajorTestSchoolFilterRegion.appendChild(option);
+  });
+  adjustmentMajorTestSchoolFilterRegion.value = regions.includes(current) ? current : '';
+}
+
+function buildAdjustmentMajorSchoolPickerSummaryText(displayedCount) {
+  const totalCount = adjustmentMajorTestSchoolCandidates.length;
+  const selectedCount = adjustmentMajorTestSelectedSchoolKeys.size;
+  const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
+  const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || totalCount || 0);
+  const distributionBaseText = formatAdjustmentMajorDistributionBase(adjustmentMajorTestPreviewMeta);
+  const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
+  const baseText =
+    `已匹配候选院校 ${totalCount} 所（开设院校基数 ${catalogSchoolBase} 所，专业点分布基数 ${distributionBaseText}，白名单补强 ${priorityCount} 所），` +
+    `筛选后展示 ${displayedCount} 所，当前勾选 ${selectedCount} 所。`;
+  return shardWarning ? `${baseText} ${shardWarning}` : baseText;
+}
+
 function clearAdjustmentMajorTestSchoolPicker() {
   adjustmentMajorTestSchoolCandidates = [];
   adjustmentMajorTestSelectedSchoolKeys = new Set();
   adjustmentMajorTestPreviewSignature = '';
   adjustmentMajorTestPreviewMeta = null;
+  if (adjustmentMajorTestSchoolFilterRegion) adjustmentMajorTestSchoolFilterRegion.value = '';
+  if (adjustmentMajorTestSchoolFilterSource) adjustmentMajorTestSchoolFilterSource.value = '';
+  if (adjustmentMajorTestSchoolFilterKeyword) adjustmentMajorTestSchoolFilterKeyword.value = '';
   if (adjustmentMajorTestSchoolPickerSummary) adjustmentMajorTestSchoolPickerSummary.textContent = '';
   if (adjustmentMajorTestSchoolPickerList) adjustmentMajorTestSchoolPickerList.innerHTML = '';
   if (adjustmentMajorTestSchoolPicker) adjustmentMajorTestSchoolPicker.classList.add('hidden');
@@ -921,16 +1113,15 @@ function renderAdjustmentMajorTestSchoolPicker() {
     return;
   }
 
+  updateAdjustmentMajorSchoolFilterOptions();
+  const filteredSchools = applyAdjustmentMajorSchoolPickerFilters();
   adjustmentMajorTestSchoolPicker.classList.remove('hidden');
-  const selectedCount = adjustmentMajorTestSelectedSchoolKeys.size;
-  const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
-  const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || adjustmentMajorTestSchoolCandidates.length || 0);
-  const distributionBaseText = formatAdjustmentMajorDistributionBase(adjustmentMajorTestPreviewMeta);
-  const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
-  adjustmentMajorTestSchoolPickerSummary.textContent =
-    `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，专业点分布基数 ${distributionBaseText}，白名单补强 ${priorityCount} 所），当前勾选 ${selectedCount} 所。` +
-    (shardWarning ? ` ${shardWarning}` : '');
-  adjustmentMajorTestSchoolPickerList.innerHTML = adjustmentMajorTestSchoolCandidates
+  adjustmentMajorTestSchoolPickerSummary.textContent = buildAdjustmentMajorSchoolPickerSummaryText(filteredSchools.length);
+  if (!filteredSchools.length) {
+    adjustmentMajorTestSchoolPickerList.innerHTML = '<li class="empty">当前筛选条件下没有匹配院校，请放宽筛选条件。</li>';
+    return;
+  }
+  adjustmentMajorTestSchoolPickerList.innerHTML = filteredSchools
     .map((school) => {
       const key = buildAdjustmentMajorSchoolCandidateKey(school);
       const checked = adjustmentMajorTestSelectedSchoolKeys.has(key) ? 'checked' : '';
@@ -939,7 +1130,7 @@ function renderAdjustmentMajorTestSchoolPicker() {
         .filter(Boolean)
         .slice(0, 3)
         .join(' / ');
-      const sourceLabel = school.priority ? '重点白名单' : school.source === 'cache' ? '历史缓存' : '';
+      const sourceLabel = getAdjustmentMajorSchoolSourceLabel(school);
       return `<li>
         <label>
           <input type="checkbox" data-major-school-key="${escapeHtml(key)}" ${checked} />
@@ -963,17 +1154,14 @@ function syncAdjustmentMajorTestSelectedSchools(checked, key) {
   if (checked) adjustmentMajorTestSelectedSchoolKeys.add(key);
   else adjustmentMajorTestSelectedSchoolKeys.delete(key);
   if (adjustmentMajorTestSchoolPickerSummary) {
-    const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
-    const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || adjustmentMajorTestSchoolCandidates.length || 0);
-    const distributionBaseText = formatAdjustmentMajorDistributionBase(adjustmentMajorTestPreviewMeta);
-    const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
-    adjustmentMajorTestSchoolPickerSummary.textContent =
-      `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，专业点分布基数 ${distributionBaseText}，白名单补强 ${priorityCount} 所），当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。` +
-      (shardWarning ? ` ${shardWarning}` : '');
+    const filteredCount = applyAdjustmentMajorSchoolPickerFilters().length;
+    adjustmentMajorTestSchoolPickerSummary.textContent = buildAdjustmentMajorSchoolPickerSummaryText(filteredCount);
   }
 }
 
 async function runAdjustmentMajorTestPreview(payload) {
+  setAdjustmentMajorMonitorMode('匹配院校中');
+  logToMonitor('info', `开始匹配院校：${String(payload?.majorKeyword || '').trim() || '未命名专业'}`);
   const data = await api('/api/adjustment-major-test/query', {
     method: 'POST',
     body: JSON.stringify({
@@ -988,6 +1176,12 @@ async function runAdjustmentMajorTestPreview(payload) {
   adjustmentMajorTestPreviewMeta = summary;
   adjustmentMajorTestPreviewSignature = buildAdjustmentMajorTestPreviewSignature(payload);
   renderAdjustmentMajorTestSchoolPicker();
+  if (summary?.provinceShardTriggered) {
+    const provinceCount = Number(summary?.provinceShardScannedProvinces || 0);
+    logToMonitor('warn', `触发分省分片补抓，已扫描 ${provinceCount} 个省份`);
+  }
+  setAdjustmentMajorMonitorMode(schools.length ? '待执行（已匹配）' : '待执行');
+  logToMonitor('success', `院校匹配完成：${schools.length} 所候选院校`);
   return schools.length;
 }
 
@@ -1252,6 +1446,7 @@ function renderAdjustmentMajorTestResult(result) {
     if (adjustmentMajorTestSummary) adjustmentMajorTestSummary.textContent = '';
     if (adjustmentMajorTestMajorHits) adjustmentMajorTestMajorHits.textContent = '';
     renderPager(adjustmentMajorTestPager, 'adjustmentMajorTest', 0);
+    setAdjustmentMajorMonitorStats({});
     return;
   }
 
@@ -1270,6 +1465,7 @@ function renderAdjustmentMajorTestResult(result) {
   if (adjustmentMajorTestHasAttachmentFilter) adjustmentMajorTestHasAttachmentFilter.checked = false;
   updateAdjustmentMajorTestRegionOptions();
   rerenderAdjustmentMajorTest(true);
+  setAdjustmentMajorMonitorStats(adjustmentMajorTestState.summary || {});
 }
 
 function renderAdjustmentCleanQuickSchools() {
@@ -3364,6 +3560,8 @@ if (adjustmentCleanList) {
 if (adjustmentMajorTestRefreshBtn) {
   adjustmentMajorTestRefreshBtn.addEventListener('click', async () => {
     try {
+      setAdjustmentMajorMonitorMode('刷新本地库中');
+      logToMonitor('info', '开始刷新研招网本地库');
       setButtonBusy(adjustmentMajorTestRefreshBtn, true, '刷新中...');
       const data = await api('/api/adjustment-major-test/catalog-refresh', {
         method: 'POST',
@@ -3374,8 +3572,12 @@ if (adjustmentMajorTestRefreshBtn) {
       }
       clearAdjustmentMajorTestSchoolPicker();
       showToast('研招网本地库刷新完成');
+      logToMonitor('success', '研招网本地库刷新完成');
+      setAdjustmentMajorMonitorMode('待执行');
     } catch (error) {
       showToast(error.message, true);
+      logToMonitor('error', error.message);
+      setAdjustmentMajorMonitorMode('异常');
     } finally {
       setButtonBusy(adjustmentMajorTestRefreshBtn, false);
     }
@@ -3387,7 +3589,7 @@ if (adjustmentMajorTestForm) {
     e.preventDefault();
     const payload = collectAdjustmentMajorTestPayload();
     if (!payload.majorKeyword) {
-      showToast('请先填写专业关键词', true);
+      notifyAndLog('warn', '请先填写专业关键词', true);
       return;
     }
     const signature = buildAdjustmentMajorTestPreviewSignature(payload);
@@ -3397,18 +3599,20 @@ if (adjustmentMajorTestForm) {
         setButtonBusy(adjustmentMajorTestRunBtn, true, '匹配院校中...');
         const matchedCount = await runAdjustmentMajorTestPreview(payload);
         if (!matchedCount) {
-          showToast('未匹配到可选院校，请调整专业关键词后重试', true);
+          notifyAndLog('warn', '未匹配到可选院校，请调整专业关键词后重试', true);
           return;
         }
         const shardHint = adjustmentMajorTestPreviewMeta?.provinceShardTriggered ? '（已触发省份分片补抓）' : '';
-        showToast(`院校已匹配${shardHint}，请先勾选目标院校后再执行`, false);
+        notifyAndLog('info', `院校已匹配${shardHint}，请先勾选目标院校后再执行`, false);
         return;
       }
       const selectedSchools = Array.from(adjustmentMajorTestSelectedSchoolKeys);
       if (!selectedSchools.length) {
-        showToast('请至少勾选 1 所院校后再执行', true);
+        notifyAndLog('warn', '请至少勾选 1 所院校后再执行', true);
         return;
       }
+      setAdjustmentMajorMonitorMode('执行测试中');
+      logToMonitor('info', `开始抓取：${selectedSchools.length} 所院校`);
       setButtonBusy(adjustmentMajorTestRunBtn, true, '测试中...');
       const data = await api('/api/adjustment-major-test/query', {
         method: 'POST',
@@ -3420,10 +3624,22 @@ if (adjustmentMajorTestForm) {
       renderAdjustmentMajorTestResult(data.result);
       await Promise.all([loadAdjustmentMajorTestCatalogStatus(), loadAdjustmentMajorTestCache()]);
       switchModule('adjustment-major-test-module');
+      switchMajorPane('query');
+      setAdjustmentMajorMonitorMode('已完成');
+      setAdjustmentMajorMonitorStats(data.result?.summary || {});
+      if (Number(data.result?.summary?.searchFallbackSchools || 0) > 0 || Number(data.result?.summary?.searchFallbackNotices || 0) > 0) {
+        logToMonitor(
+          'warn',
+          `已启用搜索补缺：院校 ${Number(data.result?.summary?.searchFallbackSchools || 0)} 所，补充公告 ${Number(
+            data.result?.summary?.searchFallbackNotices || 0
+          )} 条`
+        );
+      }
       const shardHint = data.result?.summary?.provinceShardTriggered ? '（已触发省份分片补抓）' : '';
-      showToast(`专业测试完成：命中 ${data.result?.summary?.totalNotices || 0} 条${shardHint}`);
+      notifyAndLog('success', `专业测试完成：命中 ${data.result?.summary?.totalNotices || 0} 条${shardHint}`);
     } catch (error) {
-      showToast(error.message, true);
+      setAdjustmentMajorMonitorMode('异常');
+      notifyAndLog('error', error.message, true);
     } finally {
       setButtonBusy(adjustmentMajorTestRunBtn, false);
     }
@@ -3434,20 +3650,21 @@ if (adjustmentMajorTestMatchBtn) {
   adjustmentMajorTestMatchBtn.addEventListener('click', async () => {
     const payload = collectAdjustmentMajorTestPayload();
     if (!payload.majorKeyword) {
-      showToast('请先填写专业关键词', true);
+      notifyAndLog('warn', '请先填写专业关键词', true);
       return;
     }
     try {
       setButtonBusy(adjustmentMajorTestMatchBtn, true, '匹配中...');
       const matchedCount = await runAdjustmentMajorTestPreview(payload);
       if (!matchedCount) {
-        showToast('未匹配到可选院校，请调整专业关键词后重试', true);
+        notifyAndLog('warn', '未匹配到可选院校，请调整专业关键词后重试', true);
         return;
       }
       const shardHint = adjustmentMajorTestPreviewMeta?.provinceShardTriggered ? '（已触发省份分片补抓）' : '';
-      showToast(`已匹配 ${matchedCount} 所院校${shardHint}，请勾选后执行专业测试`);
+      notifyAndLog('success', `已匹配 ${matchedCount} 所院校${shardHint}，请勾选后执行专业测试`);
     } catch (error) {
-      showToast(error.message, true);
+      setAdjustmentMajorMonitorMode('异常');
+      notifyAndLog('error', error.message, true);
     } finally {
       setButtonBusy(adjustmentMajorTestMatchBtn, false);
     }
@@ -3468,6 +3685,7 @@ if (adjustmentMajorTestSchoolPickerList) {
     if (!key) return;
     adjustmentMajorTestSelectedSchoolKeys = new Set([key]);
     renderAdjustmentMajorTestSchoolPicker();
+    logToMonitor('info', '切换为单校执行');
     if (!adjustmentMajorTestForm) return;
     adjustmentMajorTestForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
   });
@@ -3475,34 +3693,86 @@ if (adjustmentMajorTestSchoolPickerList) {
 
 if (adjustmentMajorTestPickAllBtn) {
   adjustmentMajorTestPickAllBtn.addEventListener('click', () => {
-    adjustmentMajorTestSelectedSchoolKeys = new Set(
-      adjustmentMajorTestSchoolCandidates.map((item) => buildAdjustmentMajorSchoolCandidateKey(item)).filter(Boolean)
-    );
-    renderAdjustmentMajorTestSchoolPicker();
-  });
-}
-
-if (adjustmentMajorTestPickInvertBtn) {
-  adjustmentMajorTestPickInvertBtn.addEventListener('click', () => {
-    const nextSelected = new Set();
-    adjustmentMajorTestSchoolCandidates.forEach((item) => {
+    const nextSelected = new Set(adjustmentMajorTestSelectedSchoolKeys);
+    applyAdjustmentMajorSchoolPickerFilters().forEach((item) => {
       const key = buildAdjustmentMajorSchoolCandidateKey(item);
-      if (!key) return;
-      if (!adjustmentMajorTestSelectedSchoolKeys.has(key)) nextSelected.add(key);
+      if (key) nextSelected.add(key);
     });
     adjustmentMajorTestSelectedSchoolKeys = nextSelected;
     renderAdjustmentMajorTestSchoolPicker();
   });
 }
 
+if (adjustmentMajorTestPickInvertBtn) {
+  adjustmentMajorTestPickInvertBtn.addEventListener('click', () => {
+    const nextSelected = new Set(adjustmentMajorTestSelectedSchoolKeys);
+    applyAdjustmentMajorSchoolPickerFilters().forEach((item) => {
+      const key = buildAdjustmentMajorSchoolCandidateKey(item);
+      if (!key) return;
+      if (nextSelected.has(key)) nextSelected.delete(key);
+      else nextSelected.add(key);
+    });
+    adjustmentMajorTestSelectedSchoolKeys = nextSelected;
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+if (adjustmentMajorTestSchoolFilterRegion) {
+  adjustmentMajorTestSchoolFilterRegion.addEventListener('change', () => {
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+if (adjustmentMajorTestSchoolFilterSource) {
+  adjustmentMajorTestSchoolFilterSource.addEventListener('change', () => {
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+if (adjustmentMajorTestSchoolFilterKeyword) {
+  adjustmentMajorTestSchoolFilterKeyword.addEventListener('input', () => {
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+if (adjustmentMajorTestSchoolFilterReset) {
+  adjustmentMajorTestSchoolFilterReset.addEventListener('click', () => {
+    if (adjustmentMajorTestSchoolFilterRegion) adjustmentMajorTestSchoolFilterRegion.value = '';
+    if (adjustmentMajorTestSchoolFilterSource) adjustmentMajorTestSchoolFilterSource.value = '';
+    if (adjustmentMajorTestSchoolFilterKeyword) adjustmentMajorTestSchoolFilterKeyword.value = '';
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+if (majorWorkbenchTabs) {
+  majorWorkbenchTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-major-pane]');
+    if (!btn) return;
+    const pane = String(btn.dataset.majorPane || '').trim();
+    switchMajorPane(pane);
+  });
+}
+
+switchMajorPane('query');
+setAdjustmentMajorMonitorMode('待执行');
+setAdjustmentMajorMonitorStats({});
+renderAdjustmentMajorMonitorLogs();
+
 [
   adjustmentMajorTestMajor,
   adjustmentMajorTestYear,
   adjustmentMajorTestKeywords,
   adjustmentMajorTestMaxSchools,
+  adjustmentMajorTestMaxNotices,
   adjustmentMajorTestMaxMajors,
   adjustmentMajorTestRefreshBeforeRun,
-  adjustmentMajorTestUsePriority
+  adjustmentMajorTestUsePriority,
+  adjustmentMajorTestEnableSearchFallback,
+  adjustmentMajorTestSearchFallbackForAll,
+  adjustmentMajorTestSearchFallbackMaxSchools,
+  adjustmentMajorTestSearchFallbackLimit,
+  adjustmentMajorTestSearchFallbackSources,
+  adjustmentMajorTestSearchFallbackKeywords
 ].forEach((el) => {
   if (!el) return;
   const eventName = el.tagName === 'INPUT' && el.type === 'checkbox' ? 'change' : 'input';
@@ -3580,11 +3850,17 @@ if (adjustmentMajorTestFilterReset) {
 if (adjustmentMajorCacheRefreshBtn) {
   adjustmentMajorCacheRefreshBtn.addEventListener('click', async () => {
     try {
+      setAdjustmentMajorMonitorMode('缓存刷新中');
+      logToMonitor('info', '开始刷新缓存列表');
       setButtonBusy(adjustmentMajorCacheRefreshBtn, true, '刷新中...');
       await loadAdjustmentMajorTestCache();
       showToast('缓存列表已刷新');
+      logToMonitor('success', '缓存列表已刷新');
+      setAdjustmentMajorMonitorMode('待执行');
     } catch (error) {
       showToast(error.message, true);
+      logToMonitor('error', error.message);
+      setAdjustmentMajorMonitorMode('异常');
     } finally {
       setButtonBusy(adjustmentMajorCacheRefreshBtn, false);
     }
@@ -3605,6 +3881,8 @@ if (adjustmentMajorCachePruneBtn) {
       ? { keepCount, majorKeyword: selected.majorKeyword || '', majorKey: selected.majorKey || '' }
       : { keepCount };
     try {
+      setAdjustmentMajorMonitorMode('缓存整理中');
+      logToMonitor('info', `开始执行缓存保留：每个专业保留 ${keepCount} 条`);
       setButtonBusy(adjustmentMajorCachePruneBtn, true, '处理中...');
       const data = await api('/api/adjustment-major-test/cache/prune', {
         method: 'POST',
@@ -3612,8 +3890,12 @@ if (adjustmentMajorCachePruneBtn) {
       });
       await loadAdjustmentMajorTestCache();
       showToast(`保留完成：删除 ${data.deleted || 0} 条缓存记录`);
+      logToMonitor('success', `保留完成：删除 ${data.deleted || 0} 条缓存记录`);
+      setAdjustmentMajorMonitorMode('待执行');
     } catch (error) {
       showToast(error.message, true);
+      logToMonitor('error', error.message);
+      setAdjustmentMajorMonitorMode('异常');
     } finally {
       setButtonBusy(adjustmentMajorCachePruneBtn, false);
     }
@@ -3630,6 +3912,8 @@ if (adjustmentMajorCacheClearMajorBtn) {
     const confirmed = window.confirm(`确认清空“${selected.majorKeyword || selected.majorKey}”的全部缓存吗？`);
     if (!confirmed) return;
     try {
+      setAdjustmentMajorMonitorMode('缓存清理中');
+      logToMonitor('warn', `开始清空专业缓存：${selected.majorKeyword || selected.majorKey || '-'}`);
       setButtonBusy(adjustmentMajorCacheClearMajorBtn, true, '清空中...');
       const data = await api('/api/adjustment-major-test/cache/clear', {
         method: 'POST',
@@ -3637,8 +3921,12 @@ if (adjustmentMajorCacheClearMajorBtn) {
       });
       await loadAdjustmentMajorTestCache();
       showToast(`已清空该专业缓存 ${data.deleted || 0} 条`);
+      logToMonitor('success', `已清空该专业缓存 ${data.deleted || 0} 条`);
+      setAdjustmentMajorMonitorMode('待执行');
     } catch (error) {
       showToast(error.message, true);
+      logToMonitor('error', error.message);
+      setAdjustmentMajorMonitorMode('异常');
     } finally {
       setButtonBusy(adjustmentMajorCacheClearMajorBtn, false);
     }
@@ -3650,6 +3938,8 @@ if (adjustmentMajorCacheClearAllBtn) {
     const confirmed = window.confirm('确认清空全部专业测试缓存吗？');
     if (!confirmed) return;
     try {
+      setAdjustmentMajorMonitorMode('缓存清理中');
+      logToMonitor('warn', '开始清空全部专业缓存');
       setButtonBusy(adjustmentMajorCacheClearAllBtn, true, '清空中...');
       const data = await api('/api/adjustment-major-test/cache/clear', {
         method: 'POST',
@@ -3657,8 +3947,12 @@ if (adjustmentMajorCacheClearAllBtn) {
       });
       await loadAdjustmentMajorTestCache();
       showToast(`已清空全部缓存 ${data.deleted || 0} 条`);
+      logToMonitor('success', `已清空全部缓存 ${data.deleted || 0} 条`);
+      setAdjustmentMajorMonitorMode('待执行');
     } catch (error) {
       showToast(error.message, true);
+      logToMonitor('error', error.message);
+      setAdjustmentMajorMonitorMode('异常');
     } finally {
       setButtonBusy(adjustmentMajorCacheClearAllBtn, false);
     }
@@ -3674,7 +3968,9 @@ if (adjustmentMajorCacheList) {
     if (adjustmentMajorTestMajor) adjustmentMajorTestMajor.value = major;
     if (adjustmentMajorTestYear) adjustmentMajorTestYear.value = year;
     switchModule('adjustment-major-test-module');
+    switchMajorPane('query');
     showToast('已套用到专业调剂测试表单');
+    logToMonitor('info', `已从缓存套用查询条件：${major || '-'} ${year ? `/ ${year}` : ''}`);
   });
 }
 

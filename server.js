@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const dns = require('dns/promises');
 const net = require('net');
+const { once } = require('events');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 let DatabaseSync = null;
@@ -103,6 +104,18 @@ const YANZHAO_PROVINCE_SHARD_DELAY_MAX_MS = Math.max(
 const YANZHAO_PROVINCE_SHARD_MAX_PAGES = Math.max(1, Math.min(12, Number(process.env.YANZHAO_PROVINCE_SHARD_MAX_PAGES) || 8));
 const ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT = 40;
 const ADJUSTMENT_MAJOR_TEST_CACHE_ITEM_LIMIT = 260;
+const MAX_HTML_RESPONSE_BYTES = Math.max(512 * 1024, Number(process.env.MAX_HTML_RESPONSE_BYTES) || 2 * 1024 * 1024);
+const MAJOR_TEST_MAX_RUN_SCHOOLS = Math.max(20, Math.min(120, Number(process.env.MAJOR_TEST_MAX_RUN_SCHOOLS) || 80));
+const ADJUSTMENT_MAJOR_TEST_RESPONSE_ITEM_LIMIT = Math.max(
+  120,
+  Math.min(5000, Number(process.env.ADJUSTMENT_MAJOR_TEST_RESPONSE_ITEM_LIMIT) || 1200)
+);
+const ADJUSTMENT_MAJOR_TEST_SPILL_TRIGGER = Math.max(
+  240,
+  Math.min(20000, Number(process.env.ADJUSTMENT_MAJOR_TEST_SPILL_TRIGGER) || 1800)
+);
+const ADJUSTMENT_MAJOR_TEST_KEEP_SPILL_FILES = normalizeBooleanFlag(process.env.ADJUSTMENT_MAJOR_TEST_KEEP_SPILL_FILES, false);
+const ADJUSTMENT_MAJOR_TEST_SPILL_DIR = path.join(DATA_DIR, 'tmp');
 const YANZHAO_PROVINCE_LIST = [
   { code: '11', name: '北京', zone: '一区' },
   { code: '12', name: '天津', zone: '一区' },
@@ -3535,12 +3548,31 @@ async function safeHttpGet(url, config = {}, maxRedirects = 5) {
   throw new Error('重定向次数超过限制');
 }
 
+async function readStreamWithByteLimit(stream, limitBytes, label = 'response') {
+  const chunks = [];
+  let total = 0;
+  for await (const chunkLike of stream) {
+    const chunk = Buffer.isBuffer(chunkLike) ? chunkLike : Buffer.from(chunkLike);
+    total += chunk.length;
+    if (total > limitBytes) {
+      if (typeof stream.destroy === 'function') {
+        stream.destroy(new Error(`${label} exceeds limit ${limitBytes}`));
+      }
+      throw new Error(`${label} exceeds limit ${limitBytes}`);
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, total);
+}
+
 async function fetchHtml(url) {
   const { response, finalUrl } = await safeHttpGet(
     url,
     {
-      responseType: 'arraybuffer',
+      responseType: 'stream',
       timeout: 20000,
+      maxContentLength: MAX_HTML_RESPONSE_BYTES,
+      maxBodyLength: MAX_HTML_RESPONSE_BYTES,
       headers: {
         'User-Agent': USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -3551,7 +3583,15 @@ async function fetchHtml(url) {
     5
   );
 
-  const raw = Buffer.from(response.data);
+  const contentType = String(response.headers?.['content-type'] || '').toLowerCase();
+  if (isLikelyDocumentContentType(contentType)) {
+    if (response.data && typeof response.data.destroy === 'function') {
+      response.data.destroy();
+    }
+    return { html: '', finalUrl, contentType };
+  }
+
+  const raw = await readStreamWithByteLimit(response.data, MAX_HTML_RESPONSE_BYTES, 'html response');
   let charset = detectCharset(response.headers, raw);
   if (charset === 'gbk' || charset === 'gb2312') {
     charset = 'gb18030';
@@ -3567,7 +3607,7 @@ async function fetchHtml(url) {
   return {
     html,
     finalUrl,
-    contentType: String(response.headers?.['content-type'] || '').toLowerCase()
+    contentType
   };
 }
 
@@ -5270,6 +5310,134 @@ async function mapWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
+async function mapWithConcurrencyDrain(items, concurrency, worker, onResult) {
+  const list = Array.isArray(items) ? items : [];
+  const limit = Math.max(1, Number(concurrency) || 1);
+  const consume = typeof onResult === 'function' ? onResult : async () => {};
+  let cursor = 0;
+  async function runOne() {
+    while (true) {
+      const idx = cursor;
+      cursor += 1;
+      if (idx >= list.length) return;
+      const value = await worker(list[idx], idx);
+      await consume(value, idx);
+    }
+  }
+  const jobs = [];
+  for (let i = 0; i < Math.min(limit, list.length); i += 1) {
+    jobs.push(runOne());
+  }
+  await Promise.all(jobs);
+}
+
+function compareAdjustmentMajorNoticePriority(a, b) {
+  if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
+    return b.publishedDate.localeCompare(a.publishedDate);
+  }
+  return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+}
+
+function buildAdjustmentMajorSpillPath() {
+  const stamp = nowTs();
+  const random = crypto.randomBytes(5).toString('hex');
+  return path.join(ADJUSTMENT_MAJOR_TEST_SPILL_DIR, `major-test-spill-${stamp}-${process.pid}-${random}.ndjson`);
+}
+
+function createAdjustmentMajorSpillStore() {
+  let writeStream = null;
+  let openPromise = null;
+  let closed = false;
+  let writerError = null;
+  let spillPath = '';
+  let spilledCount = 0;
+
+  async function ensureStream() {
+    if (writeStream) return writeStream;
+    if (openPromise) return openPromise;
+    openPromise = (async () => {
+      await fsp.mkdir(ADJUSTMENT_MAJOR_TEST_SPILL_DIR, { recursive: true });
+      spillPath = buildAdjustmentMajorSpillPath();
+      writeStream = fs.createWriteStream(spillPath, { flags: 'a', encoding: 'utf8' });
+      writeStream.on('error', (error) => {
+        writerError = error instanceof Error ? error : new Error(String(error || 'spill write failed'));
+      });
+      await new Promise((resolve, reject) => {
+        writeStream.once('open', resolve);
+        writeStream.once('error', reject);
+      });
+      return writeStream;
+    })();
+    return openPromise;
+  }
+
+  async function writeItems(items) {
+    if (closed) return;
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) return;
+    const stream = await ensureStream();
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue;
+      if (writerError) throw writerError;
+      const line = `${JSON.stringify(item)}\n`;
+      if (!stream.write(line, 'utf8')) {
+        await once(stream, 'drain');
+      }
+      spilledCount += 1;
+    }
+    if (writerError) throw writerError;
+  }
+
+  async function finalize(keepFile = ADJUSTMENT_MAJOR_TEST_KEEP_SPILL_FILES) {
+    if (closed) {
+      return {
+        spilledCount,
+        spillPath,
+        keepFile: Boolean(keepFile),
+        removed: false,
+        writerError: writerError ? String(writerError.message || writerError) : ''
+      };
+    }
+    closed = true;
+    if (!writeStream) {
+      return {
+        spilledCount,
+        spillPath: '',
+        keepFile: false,
+        removed: false,
+        writerError: writerError ? String(writerError.message || writerError) : ''
+      };
+    }
+    writeStream.end();
+    try {
+      await once(writeStream, 'finish');
+    } catch (error) {
+      // ignore
+    }
+    let removed = false;
+    if (!keepFile && spillPath) {
+      try {
+        await fsp.rm(spillPath, { force: true });
+        removed = true;
+      } catch (error) {
+        removed = false;
+      }
+    }
+    return {
+      spilledCount,
+      spillPath,
+      keepFile: Boolean(keepFile),
+      removed,
+      writerError: writerError ? String(writerError.message || writerError) : ''
+    };
+  }
+
+  return {
+    writeItems,
+    finalize
+  };
+}
+
 async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
   const schoolName = String(schoolCandidate?.schoolName || schoolCandidate?.dwmc || '').trim();
   const collegeName = String(schoolCandidate?.collegeName || '').trim();
@@ -5316,7 +5484,6 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
         const attachmentText = Array.isArray(detail.attachments) ? detail.attachments.map((item) => item.name).join(' ') : '';
         const mergedText = `${detail.title || seed.title || ''}\n${cleanedContent}\n${attachmentText}`;
         const majorHit = isMajorKeywordMatch(mergedText, majorKeyword);
-        if (!majorHit) continue;
         const keywordMatch = scoreKeywordMatches(mergedText, keywordMatchers);
         const adjustmentHits = countHintHits(mergedText, ADJUSTMENT_HINTS) + (/(调剂|名额|缺额|接受调剂)/.test(mergedText) ? 1 : 0);
         const quota = extractAdjustmentQuota(mergedText);
@@ -5332,7 +5499,8 @@ async function runAdjustmentMajorTestForSchool(schoolCandidate, options = {}) {
           const yearText = `${publishedDate || ''} ${detail.title || ''} ${detail.url || ''} ${cleanedContent || ''}`;
           if (!yearText.includes(targetYear)) continue;
         }
-        if (adjustmentHits <= 0 && quota.numbers.length <= 0 && keywordMatch.keywordMatchScore <= 0) continue;
+        // 先按“有调剂公告就抓取”执行：必须命中调剂信号，不再强制要求专业词命中
+        if (adjustmentHits <= 0) continue;
         const item = {
           id: `${normalizeUrlForKey(detail.url || seed.url)}::${normalizeMatchText(detail.title || seed.title || '')}::${normalizeMatchText(schoolName)}`,
           schoolName,
@@ -5715,49 +5883,105 @@ async function runAdjustmentMajorTest(options = {}) {
   const keywordMatchers = buildKeywordMatchers(
     Array.from(new Set([...buildMajorKeywordVariants(majorKeyword), ...keywords, '调剂', '名额', '缺额', '复试', '研究生招生']))
   );
-  const runSchoolLimit = selectedSchoolKeys.size ? Math.min(120, selectedSchoolKeys.size) : maxSchools;
-  const fallbackBudget = { remaining: searchFallbackMaxSchools };
-  const schoolResults = await mapWithConcurrency(schoolCandidates.slice(0, runSchoolLimit), 2, async (school) =>
-    runAdjustmentMajorTestForSchool(school, {
-      majorKeyword,
-      targetYear,
-      keywordMatchers,
-      maxNoticesPerSchool,
-      enableSearchFallback,
-      searchFallbackForAll,
-      searchFallbackLimit,
-      searchFallbackSources,
-      searchFallbackKeywords,
-      fallbackBudget
-    })
+  const requestedRunSchoolLimit = selectedSchoolKeys.size ? selectedSchoolKeys.size : maxSchools;
+  const runSchoolLimit = Math.min(MAJOR_TEST_MAX_RUN_SCHOOLS, requestedRunSchoolLimit);
+  const runSchoolLimitCapped = runSchoolLimit < requestedRunSchoolLimit;
+  const mergedLimit = Math.max(120, maxSchools * maxNoticesPerSchool * 3);
+  const transientFreshLimit = Math.max(240, Math.min(mergedLimit * 2, ADJUSTMENT_MAJOR_TEST_RESPONSE_ITEM_LIMIT * 3));
+  const spillTriggerLimit = Math.max(
+    ADJUSTMENT_MAJOR_TEST_RESPONSE_ITEM_LIMIT,
+    Math.min(transientFreshLimit, ADJUSTMENT_MAJOR_TEST_SPILL_TRIGGER)
   );
-  const schools = schoolResults.map((item) => ({
-    ...item,
-    majorMatches: Array.isArray(item.majorMatches) ? item.majorMatches : []
-  }));
-  const items = schools.flatMap((school) =>
-    (Array.isArray(school.notices) ? school.notices : []).map((notice) => ({
-      ...notice,
-      schoolName: school.schoolName,
-      dwdm: school.dwdm,
-      ssmc: school.ssmc,
-      majorMatches: school.majorMatches
-    }))
+  const fallbackBudget = { remaining: searchFallbackMaxSchools };
+  const spillStore = createAdjustmentMajorSpillStore();
+  let spillWriteError = '';
+  const schools = [];
+  const freshItems = [];
+
+  await mapWithConcurrencyDrain(
+    schoolCandidates.slice(0, runSchoolLimit),
+    2,
+    async (school) =>
+      runAdjustmentMajorTestForSchool(school, {
+        majorKeyword,
+        targetYear,
+        keywordMatchers,
+        maxNoticesPerSchool,
+        enableSearchFallback,
+        searchFallbackForAll,
+        searchFallbackLimit,
+        searchFallbackSources,
+        searchFallbackKeywords,
+        fallbackBudget
+      }),
+    async (item) => {
+      if (!item) return;
+      const schoolMajorMatches = Array.isArray(item.majorMatches) ? item.majorMatches : [];
+      const notices = Array.isArray(item.notices) ? item.notices : [];
+      for (const notice of notices) {
+        freshItems.push({
+          ...notice,
+          schoolName: item.schoolName,
+          dwdm: item.dwdm,
+          ssmc: item.ssmc,
+          majorMatches: schoolMajorMatches
+        });
+      }
+      schools.push({
+        schoolName: item.schoolName,
+        dwdm: item.dwdm,
+        ssmc: item.ssmc,
+        majorMatches: schoolMajorMatches,
+        profile: item.profile || {},
+        pages: Array.isArray(item.pages) ? item.pages : [],
+        notices: notices.slice(0, 6).map((notice) => ({
+          title: notice.title,
+          url: notice.url,
+          publishedDate: notice.publishedDate || '',
+          quotaNumbers: Array.isArray(notice.quotaNumbers) ? notice.quotaNumbers.slice(0, 3) : []
+        })),
+        summary: item.summary || { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0, searchFallbackUsed: false, searchFallbackAdded: 0 },
+        noticeCount: notices.length,
+        error: item.error || ''
+      });
+      if (freshItems.length > transientFreshLimit) {
+        freshItems.sort(compareAdjustmentMajorNoticePriority);
+        const overflow = freshItems.splice(spillTriggerLimit);
+        if (overflow.length) {
+          try {
+            await spillStore.writeItems(overflow);
+          } catch (error) {
+            spillWriteError = spillWriteError || (error?.message ? String(error.message) : 'spill write failed');
+          }
+        }
+        if (freshItems.length > transientFreshLimit) {
+          freshItems.length = transientFreshLimit;
+        }
+      }
+    }
   );
 
-  const freshItems = items.sort((a, b) => {
-    if (a.publishedDate && b.publishedDate && a.publishedDate !== b.publishedDate) {
-      return b.publishedDate.localeCompare(a.publishedDate);
-    }
-    return (b.relevanceScore || 0) - (a.relevanceScore || 0);
-  });
-  const mergedLimit = Math.max(120, maxSchools * maxNoticesPerSchool * 3);
-  const finalItems =
+  const spillFinalize = await spillStore.finalize(ADJUSTMENT_MAJOR_TEST_KEEP_SPILL_FILES).catch((error) => ({
+    spilledCount: 0,
+    spillPath: '',
+    keepFile: false,
+    removed: false,
+    writerError: error?.message ? String(error.message) : 'spill finalize failed'
+  }));
+  const spilledFreshItems = Math.max(0, Number(spillFinalize?.spilledCount || 0));
+  const spillPath = String(spillFinalize?.spillPath || '').trim();
+  const spillFileKept = Boolean(spillFinalize?.keepFile && spillPath);
+  const spillFinalizeError = String(spillFinalize?.writerError || '').trim();
+
+  freshItems.sort(compareAdjustmentMajorNoticePriority);
+  const mergedItems =
     freshItems.length > 0
       ? mergeAdjustmentMajorItemsWithCache(freshItems, cachedItemSeeds, mergedLimit)
       : mergeAdjustmentMajorItemsWithCache([], cachedItemSeeds, mergedLimit);
+  const finalItems = mergedItems.slice(0, ADJUSTMENT_MAJOR_TEST_RESPONSE_ITEM_LIMIT);
+  const responseItemsCapped = mergedItems.length > finalItems.length;
   const usedCacheFallback = freshItems.length === 0 && finalItems.length > 0;
-  const schoolResultCount = schools.filter((school) => Array.isArray(school.notices) && school.notices.length > 0).length;
+  const schoolResultCount = schools.filter((school) => Number(school.noticeCount || 0) > 0).length;
   const fallbackSchoolCount = new Set(finalItems.map((item) => normalizeMatchText(item.schoolName || '')).filter(Boolean)).size;
   const shardFallbackTriggered = shardFallbackDiagnostics.length > 0;
   const shardScanned = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardScanned || 0)), 0);
@@ -5779,6 +6003,7 @@ async function runAdjustmentMajorTest(options = {}) {
     schoolsWithResult: usedCacheFallback && schoolResultCount === 0 ? fallbackSchoolCount : schoolResultCount,
     failedSchools: schools.filter((school) => school.error).length,
     totalNotices: finalItems.length,
+    totalNoticesBeforeCap: mergedItems.length,
     withQuota: finalItems.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
     withAttachment: finalItems.filter((item) => Array.isArray(item.attachments) && item.attachments.length > 0).length,
     cacheAssistSchools: supplementSchoolSeeds.length,
@@ -5801,7 +6026,15 @@ async function runAdjustmentMajorTest(options = {}) {
     provinceShardMajorCount: shardFallbackDiagnostics.length,
     provinceShardScannedProvinces: shardScanned,
     provinceShardAddedSchools: shardAdded,
-    provinceShardBlockedHits: shardBlockedHits
+    provinceShardBlockedHits: shardBlockedHits,
+    runSchoolLimit,
+    runSchoolLimitCapped,
+    responseItemsCapped,
+    spilledFreshItems,
+    spillFileKept,
+    spillPath: spillFileKept ? spillPath : '',
+    spillWriteError,
+    spillFinalizeError
   };
 
   const result = {
@@ -5826,7 +6059,16 @@ async function runAdjustmentMajorTest(options = {}) {
     schools,
     summary,
     warnings,
-    items: finalItems
+    items: finalItems,
+    spill: {
+      enabled: true,
+      triggerLimit: spillTriggerLimit,
+      spilledFreshItems,
+      keepFile: spillFileKept,
+      path: spillFileKept ? spillPath : '',
+      writeError: spillWriteError,
+      finalizeError: spillFinalizeError
+    }
   };
 
   if (freshItems.length > 0) {

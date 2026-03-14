@@ -453,142 +453,228 @@
       <section class="card module-panel module-panel-major hidden" id="adjustment-major-test-module">
         <h2>专业调剂测试</h2>
         <p class="subtitle">先按专业匹配院校，再结合高校官网研招正文进行二次过滤，适合用来找某个专业可能存在的调剂信息。</p>
+        <div class="major-workbench" id="major-workbench">
+          <div class="major-main">
+            <div class="major-pane-tabs" id="major-workbench-tabs">
+              <button type="button" class="active" data-major-pane="query">执行面板</button>
+              <button type="button" data-major-pane="priority">重点白名单</button>
+              <button type="button" data-major-pane="cache">缓存管理</button>
+            </div>
 
-        <form id="adjustment-major-test-form" class="form-grid">
-          <label>
-            专业关键词
-            <input id="adjustment-major-test-major" required placeholder="例如：学科教学（英语）" />
-          </label>
-          <label>
-            年份（可选）
-            <input id="adjustment-major-test-year" placeholder="例如：2026" />
-          </label>
-          <label>
-            附加关键词（可选，逗号分隔）
-            <input id="adjustment-major-test-keywords" placeholder="例如：调剂, 缺额, 名额, 复试" />
-          </label>
-          <label>
-            执行抓取院校上限
-            <input id="adjustment-major-test-max-schools" type="number" min="1" max="300" value="100" />
-          </label>
-          <label>
-            每校正文抓取上限
-            <input id="adjustment-major-test-max-notices" type="number" min="4" max="36" value="14" />
-          </label>
-          <label>
-            专业候选上限
-            <input id="adjustment-major-test-max-majors" type="number" min="2" max="20" value="16" />
-          </label>
-          <label class="check-row">
-            <input id="adjustment-major-test-refresh-before-run" type="checkbox" />
-            查询前强制刷新本地库
-          </label>
-          <label class="check-row">
-            <input id="adjustment-major-test-use-priority" type="checkbox" checked />
-            启用“50 所重点院校”白名单补强
-          </label>
-          <div class="actions inline-actions">
-            <button type="button" id="adjustment-major-test-refresh-btn" class="muted">刷新研招网本地库</button>
-            <button type="button" id="adjustment-major-test-match-btn" class="muted">先匹配院校</button>
-            <button type="submit" id="adjustment-major-test-run-btn">执行专业测试</button>
-            <button type="button" id="adjustment-major-test-export-btn" class="muted">导出选中为 Markdown</button>
-          </div>
-        </form>
+            <div id="major-pane-query" class="major-pane active">
+              <div class="major-card">
+                <h3>基础任务信息</h3>
+                <form id="adjustment-major-test-form" class="major-form-grid">
+                  <label>
+                    专业关键词
+                    <input id="adjustment-major-test-major" required placeholder="例如：学科教学（英语）" />
+                  </label>
+                  <label>
+                    年份（可选）
+                    <input id="adjustment-major-test-year" placeholder="例如：2026" />
+                  </label>
+                  <label>
+                    附加关键词（可选，逗号分隔）
+                    <input id="adjustment-major-test-keywords" placeholder="例如：调剂, 缺额, 名额, 复试" />
+                  </label>
+                  <label>
+                    执行抓取院校上限
+                    <input id="adjustment-major-test-max-schools" type="number" min="1" max="300" value="100" />
+                  </label>
+                  <label>
+                    每校正文抓取上限
+                    <input id="adjustment-major-test-max-notices" type="number" min="4" max="36" value="14" />
+                  </label>
+                  <label>
+                    专业候选上限
+                    <input id="adjustment-major-test-max-majors" type="number" min="2" max="20" value="16" />
+                  </label>
+                  <label class="check-row major-check-row">
+                    <input id="adjustment-major-test-refresh-before-run" type="checkbox" />
+                    查询前强制刷新本地库
+                  </label>
+                  <label class="check-row major-check-row">
+                    <input id="adjustment-major-test-use-priority" type="checkbox" checked />
+                    启用“50 所重点院校”白名单补强
+                  </label>
 
-        <p class="subtitle quick-editor-tip" id="adjustment-major-test-status">本地库状态：读取中...</p>
-        <div id="adjustment-priority-panel" class="verify-panel">
-          <h3>重点院校白名单（最多 50 所）</h3>
-          <p class="subtitle">用于专业测试阶段补强院校覆盖；可同步调剂智能导航固定院校，也可一键加载预置 50 所适配库。</p>
-          <div class="form-grid">
-            <label>
-              院校名称
-              <input id="adjustmentPrioritySchoolName" placeholder="例如：华中师范大学" />
-            </label>
-            <label>
-              学院名称（仅展示）
-              <input id="adjustmentPriorityCollegeName" placeholder="例如：外国语学院（可选）" />
-            </label>
-            <label class="check-row">
-              <input id="adjustmentPriorityIncludeCollegePages" type="checkbox" checked />
-              抓取时包含学院层级页面
-            </label>
-            <div class="actions inline-actions">
-              <button type="button" id="adjustment-priority-add-btn">加入白名单</button>
-              <button type="button" id="adjustment-priority-cancel-btn" class="muted">取消修改</button>
-              <button type="button" id="adjustment-priority-sync-btn" class="muted">同步自调剂导航</button>
-              <button type="button" id="adjustment-priority-bootstrap-btn" class="muted">加载预置 50 所</button>
+                  <details id="adjustment-major-advanced-details" class="major-advanced">
+                    <summary>展开高级配置</summary>
+                    <div class="major-advanced-grid">
+                      <label class="check-row major-check-row">
+                        <input id="adjustment-major-test-enable-search-fallback" type="checkbox" checked />
+                        启用搜索补缺（未命中时）
+                      </label>
+                      <label class="check-row major-check-row">
+                        <input id="adjustment-major-test-search-fallback-for-all" type="checkbox" />
+                        对全部院校启用补缺
+                      </label>
+                      <label>
+                        搜索补缺院校上限
+                        <input id="adjustment-major-test-search-fallback-max-schools" type="number" min="0" max="30" value="8" />
+                      </label>
+                      <label>
+                        单校补缺条数上限
+                        <input id="adjustment-major-test-search-fallback-limit" type="number" min="6" max="40" value="14" />
+                      </label>
+                      <label>
+                        补缺来源（逗号分隔）
+                        <input id="adjustment-major-test-search-fallback-sources" value="yanzhao,muchong" />
+                      </label>
+                      <label>
+                        补缺附加关键词（可选）
+                        <input id="adjustment-major-test-search-fallback-keywords" placeholder="例如：缺额, 调剂复试" />
+                      </label>
+                    </div>
+                  </details>
+
+                  <div class="major-action-bar">
+                    <button type="button" id="adjustment-major-test-refresh-btn" class="muted">刷新研招网本地库</button>
+                    <button type="button" id="adjustment-major-test-match-btn" class="muted">先匹配院校</button>
+                    <button type="submit" id="adjustment-major-test-run-btn" class="major-primary-btn">执行专业测试</button>
+                    <button type="button" id="adjustment-major-test-export-btn" class="muted">导出选中为 Markdown</button>
+                  </div>
+                </form>
+                <p class="subtitle quick-editor-tip" id="adjustment-major-test-status">本地库状态：读取中...</p>
+              </div>
+
+              <div id="adjustment-major-test-school-picker" class="verify-panel hidden">
+                <p id="adjustment-major-test-school-picker-summary" class="subtitle"></p>
+                <div class="scan-filters major-school-picker-filters">
+                  <label>
+                    地区筛选
+                    <select id="adjustment-major-test-school-filter-region">
+                      <option value="">全部地区</option>
+                    </select>
+                  </label>
+                  <label>
+                    来源筛选
+                    <select id="adjustment-major-test-school-filter-source">
+                      <option value="">全部来源</option>
+                      <option value="priority">重点白名单</option>
+                      <option value="cache">历史缓存</option>
+                      <option value="catalog">目录匹配</option>
+                    </select>
+                  </label>
+                  <label>
+                    院校关键词
+                    <input id="adjustment-major-test-school-filter-keyword" placeholder="输入院校名/代码/专业关键词" />
+                  </label>
+                  <button type="button" id="adjustment-major-test-school-filter-reset" class="muted">清空筛选</button>
+                </div>
+                <div class="actions inline-actions">
+                  <button type="button" id="adjustment-major-test-pick-all" class="muted">全选院校</button>
+                  <button type="button" id="adjustment-major-test-pick-invert" class="muted">反选院校</button>
+                </div>
+                <ul id="adjustment-major-test-school-picker-list" class="scan-list major-school-picker-list"></ul>
+              </div>
+
+              <div id="adjustment-major-test-result" class="verify-panel hidden">
+                <p id="adjustment-major-test-summary" class="subtitle"></p>
+                <p id="adjustment-major-test-major-hits" class="subtitle"></p>
+                <div class="scan-filters">
+                  <label>
+                    地区筛选
+                    <select id="adjustment-major-test-region-filter">
+                      <option value="">全部地区</option>
+                    </select>
+                  </label>
+                  <label>
+                    学位类型
+                    <select id="adjustment-major-test-degree-filter">
+                      <option value="">全部学位</option>
+                      <option value="专业学位">专业学位</option>
+                      <option value="学术学位">学术学位</option>
+                    </select>
+                  </label>
+                  <label class="check-row">
+                    <input id="adjustment-major-test-has-quota-filter" type="checkbox" />
+                    只看含名额
+                  </label>
+                  <label class="check-row">
+                    <input id="adjustment-major-test-has-attachment-filter" type="checkbox" />
+                    只看含附件
+                  </label>
+                  <button type="button" id="adjustment-major-test-filter-reset" class="muted">清空筛选</button>
+                </div>
+                <div class="actions inline-actions">
+                  <button type="button" id="adjustment-major-test-select-all" class="muted">全选</button>
+                  <button type="button" id="adjustment-major-test-invert" class="muted">反选</button>
+                </div>
+                <ul id="adjustment-major-test-list" class="scan-list"></ul>
+                <div id="adjustment-major-test-pager" class="pager"></div>
+              </div>
+            </div>
+
+            <div id="major-pane-priority" class="major-pane hidden">
+              <div id="adjustment-priority-panel" class="verify-panel major-card">
+                <h3>重点院校白名单（最多 50 所）</h3>
+                <p class="subtitle">用于专业测试阶段补强院校覆盖；可同步调剂智能导航固定院校，也可一键加载预置 50 所适配库。</p>
+                <div class="major-form-grid">
+                  <label>
+                    院校名称
+                    <input id="adjustmentPrioritySchoolName" placeholder="例如：华中师范大学" />
+                  </label>
+                  <label>
+                    学院名称（仅展示）
+                    <input id="adjustmentPriorityCollegeName" placeholder="例如：外国语学院（可选）" />
+                  </label>
+                  <label class="check-row major-check-row">
+                    <input id="adjustmentPriorityIncludeCollegePages" type="checkbox" checked />
+                    抓取时包含学院层级页面
+                  </label>
+                  <div class="actions inline-actions">
+                    <button type="button" id="adjustment-priority-add-btn">加入白名单</button>
+                    <button type="button" id="adjustment-priority-cancel-btn" class="muted">取消修改</button>
+                    <button type="button" id="adjustment-priority-sync-btn" class="muted">同步自调剂导航</button>
+                    <button type="button" id="adjustment-priority-bootstrap-btn" class="muted">加载预置 50 所</button>
+                  </div>
+                </div>
+                <p class="subtitle quick-editor-tip" id="adjustment-priority-editor-tip">当前为新增模式。</p>
+                <ul id="adjustment-priority-list"></ul>
+              </div>
+            </div>
+
+            <div id="major-pane-cache" class="major-pane hidden">
+              <div id="adjustment-major-cache-panel" class="verify-panel major-card">
+                <h3>缓存管理</h3>
+                <p id="adjustment-major-cache-summary" class="subtitle">正在读取缓存状态...</p>
+                <div class="scan-filters">
+                  <label>
+                    专业缓存筛选
+                    <select id="adjustment-major-cache-major-filter">
+                      <option value="">全部专业</option>
+                    </select>
+                  </label>
+                  <label>
+                    保留最近 N 次
+                    <input id="adjustment-major-cache-keep-count" type="number" min="1" max="50" value="5" />
+                  </label>
+                  <button type="button" id="adjustment-major-cache-refresh-btn" class="muted">刷新缓存列表</button>
+                  <button type="button" id="adjustment-major-cache-prune-btn" class="muted">执行保留</button>
+                </div>
+                <div class="major-danger-zone">
+                  <strong>高风险操作</strong>
+                  <p>以下操作会直接删除缓存数据，建议确认后执行。</p>
+                  <div class="actions inline-actions">
+                    <button type="button" id="adjustment-major-cache-clear-major-btn" class="danger">清空当前专业</button>
+                    <button type="button" id="adjustment-major-cache-clear-all-btn" class="danger">清空全部缓存</button>
+                  </div>
+                </div>
+                <ul id="adjustment-major-cache-list" class="scan-list"></ul>
+                <div id="adjustment-major-cache-pager" class="pager"></div>
+              </div>
             </div>
           </div>
-          <p class="subtitle quick-editor-tip" id="adjustment-priority-editor-tip">当前为新增模式。</p>
-          <ul id="adjustment-priority-list"></ul>
-        </div>
 
-        <div id="adjustment-major-test-school-picker" class="verify-panel hidden">
-          <p id="adjustment-major-test-school-picker-summary" class="subtitle"></p>
-          <div class="actions inline-actions">
-            <button type="button" id="adjustment-major-test-pick-all" class="muted">全选院校</button>
-            <button type="button" id="adjustment-major-test-pick-invert" class="muted">反选院校</button>
-          </div>
-          <ul id="adjustment-major-test-school-picker-list" class="scan-list major-school-picker-list"></ul>
-        </div>
-
-        <div id="adjustment-major-test-result" class="verify-panel hidden">
-          <p id="adjustment-major-test-summary" class="subtitle"></p>
-          <p id="adjustment-major-test-major-hits" class="subtitle"></p>
-          <div class="scan-filters">
-            <label>
-              地区筛选
-              <select id="adjustment-major-test-region-filter">
-                <option value="">全部地区</option>
-              </select>
-            </label>
-            <label>
-              学位类型
-              <select id="adjustment-major-test-degree-filter">
-                <option value="">全部学位</option>
-                <option value="专业学位">专业学位</option>
-                <option value="学术学位">学术学位</option>
-              </select>
-            </label>
-            <label class="check-row">
-              <input id="adjustment-major-test-has-quota-filter" type="checkbox" />
-              只看含名额
-            </label>
-            <label class="check-row">
-              <input id="adjustment-major-test-has-attachment-filter" type="checkbox" />
-              只看含附件
-            </label>
-            <button type="button" id="adjustment-major-test-filter-reset" class="muted">清空筛选</button>
-          </div>
-          <div class="actions inline-actions">
-            <button type="button" id="adjustment-major-test-select-all" class="muted">全选</button>
-            <button type="button" id="adjustment-major-test-invert" class="muted">反选</button>
-          </div>
-          <ul id="adjustment-major-test-list" class="scan-list"></ul>
-          <div id="adjustment-major-test-pager" class="pager"></div>
-        </div>
-
-        <div id="adjustment-major-cache-panel" class="verify-panel">
-          <h3>缓存管理</h3>
-          <p id="adjustment-major-cache-summary" class="subtitle">正在读取缓存状态...</p>
-          <div class="scan-filters">
-            <label>
-              专业缓存筛选
-              <select id="adjustment-major-cache-major-filter">
-                <option value="">全部专业</option>
-              </select>
-            </label>
-            <label>
-              保留最近 N 次
-              <input id="adjustment-major-cache-keep-count" type="number" min="1" max="50" value="5" />
-            </label>
-            <button type="button" id="adjustment-major-cache-refresh-btn" class="muted">刷新缓存列表</button>
-            <button type="button" id="adjustment-major-cache-prune-btn" class="muted">执行保留</button>
-            <button type="button" id="adjustment-major-cache-clear-major-btn" class="danger">清空当前专业</button>
-            <button type="button" id="adjustment-major-cache-clear-all-btn" class="danger">清空全部缓存</button>
-          </div>
-          <ul id="adjustment-major-cache-list" class="scan-list"></ul>
-          <div id="adjustment-major-cache-pager" class="pager"></div>
+          <aside class="major-monitor" id="adjustment-major-monitor-panel">
+            <div class="major-card major-monitor-card">
+              <h3>运行监控</h3>
+              <p id="adjustment-major-monitor-mode" class="subtitle">状态：待执行</p>
+              <p id="adjustment-major-monitor-stats" class="subtitle">命中 0 条 | 成功 0 校 | 失败 0 校</p>
+              <ul id="adjustment-major-monitor-log" class="major-monitor-log"></ul>
+            </div>
+          </aside>
         </div>
       </section>
 
