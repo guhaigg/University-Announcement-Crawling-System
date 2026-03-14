@@ -75,6 +75,7 @@ const ADJUSTMENT_SOURCE_LABELS = {
 };
 const YANZHAO_BASE_URL = 'https://yz.chsi.com.cn';
 const YANZHAO_CATALOG_MAX_AGE_MS = 72 * 60 * 60 * 1000;
+const YANZHAO_MIN_SCHOOL_COUNT = 600;
 const ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT = 40;
 const ADJUSTMENT_MAJOR_TEST_CACHE_ITEM_LIMIT = 260;
 const YANZHAO_PROVINCE_LIST = [
@@ -124,6 +125,11 @@ app.use(express.static(path.join(ROOT, 'public')));
 
 function nowTs() {
   return Date.now();
+}
+
+function sleep(ms) {
+  const delay = Math.max(0, Number(ms) || 0);
+  return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 function normalizeOriginValue(input) {
@@ -3712,6 +3718,41 @@ function buildYanzhaoCatalogStatus(catalogLike) {
   };
 }
 
+async function safeHttpGetHtml(url, sourceLabel = '研招网页面') {
+  const { response, finalUrl } = await safeHttpGet(
+    url,
+    {
+      responseType: 'arraybuffer',
+      timeout: 35000,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        Referer: `${YANZHAO_BASE_URL}/sch/`,
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      },
+      validateStatus: (status) => status >= 200 && status < 400
+    },
+    3
+  );
+  const raw = Buffer.from(response.data || '');
+  if (!raw.length) {
+    throw new Error(`${sourceLabel}返回空内容`);
+  }
+  let charset = detectCharset(response.headers, raw);
+  if (charset === 'gbk' || charset === 'gb2312') charset = 'gb18030';
+  let html = '';
+  try {
+    html = iconv.decode(raw, charset || 'utf8');
+  } catch (error) {
+    html = raw.toString('utf8');
+  }
+  return {
+    html: String(html || ''),
+    finalUrl,
+    charset: charset || 'utf8'
+  };
+}
+
 async function getYanzhaoJson(endpoint, sourceLabel = '研招网接口') {
   const url = `${YANZHAO_BASE_URL}${endpoint}`;
   const { response } = await safeHttpGet(
@@ -3815,22 +3856,47 @@ async function fetchYanzhaoSchoolCatalogFromZsml(options = {}) {
 
 async function fetchYanzhaoSchoolCatalogFromSchSite(options = {}) {
   const pageSize = 20;
-  const maxPages = Math.max(1, Math.min(120, Number(options.maxSchPages) || 80));
+  const maxPages = Math.max(1, Math.min(200, Number(options.maxSchPages) || 120));
+  const pageDelayMs = Math.max(0, Math.min(800, Number(options.schPageDelayMs) || 120));
+  const maxRetry = Math.max(1, Math.min(5, Number(options.schPageMaxRetry) || 3));
   const schoolMap = new Map();
+  let emptyPageHits = 0;
 
   for (let page = 0; page < maxPages; page += 1) {
     const start = page * pageSize;
     let html = '';
-    try {
-      const result = await safeHttpGetHtml(`${YANZHAO_BASE_URL}/sch/?start=${start}`, `研招网院校库分页(start=${start})`);
-      html = result.html || '';
-    } catch (error) {
-      if (page === 0) throw error;
-      break;
+    let success = false;
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxRetry; attempt += 1) {
+      try {
+        const result = await safeHttpGetHtml(`${YANZHAO_BASE_URL}/sch/?start=${start}`, `研招网院校库分页(start=${start})`);
+        html = result.html || '';
+        success = true;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxRetry) {
+          await sleep(120 * attempt);
+        }
+      }
     }
+
+    if (!success) {
+      if (page === 0 && lastError) throw lastError;
+      if (lastError) {
+        console.warn(`[catalog] sch page start=${start} failed after retries: ${lastError.message || String(lastError)}`);
+      }
+      continue;
+    }
+
     const $ = cheerio.load(html || '');
     const items = $('.sch-list-container .sch-item');
-    if (!items.length) break;
+    if (!items.length) {
+      emptyPageHits += 1;
+      if (emptyPageHits >= 2) break;
+      continue;
+    }
+    emptyPageHits = 0;
 
     items.each((_idx, node) => {
       const item = $(node);
@@ -3880,7 +3946,10 @@ async function fetchYanzhaoSchoolCatalogFromSchSite(options = {}) {
       });
     });
 
-    if (items.length < pageSize) break;
+    if (items.length < pageSize && page > 5) break;
+    if (pageDelayMs > 0) {
+      await sleep(pageDelayMs + Math.floor(Math.random() * 40));
+    }
   }
 
   return sortYanzhaoSchools(Array.from(schoolMap.values()));
@@ -3888,7 +3957,7 @@ async function fetchYanzhaoSchoolCatalogFromSchSite(options = {}) {
 
 async function fetchYanzhaoSchoolCatalog(options = {}) {
   const source = String(options.schoolSource || '').trim().toLowerCase();
-  const minSchoolCount = Math.max(100, Math.min(2000, Number(options.minSchoolCount) || 500));
+  const minSchoolCount = Math.max(100, Math.min(2000, Number(options.minSchoolCount) || YANZHAO_MIN_SCHOOL_COUNT));
   const preferSch = source !== 'zsml';
   let schoolsFromSch = [];
   let schError = null;
@@ -4047,11 +4116,13 @@ async function refreshYanzhaoCatalog(options = {}) {
 async function getOrRefreshYanzhaoCatalog(options = {}) {
   const forceRefresh = normalizeBooleanFlag(options.forceRefresh, false);
   const maxAgeMs = Math.max(1, Number(options.maxAgeMs) || YANZHAO_CATALOG_MAX_AGE_MS);
+  const minSchoolCount = Math.max(100, Math.min(2000, Number(options.minSchoolCount) || YANZHAO_MIN_SCHOOL_COUNT));
   let catalog = await readYanzhaoCatalog();
   const status = buildYanzhaoCatalogStatus(catalog || {});
   const isExpired = status.ageHours !== null && status.ageHours * 3600000 > maxAgeMs;
-  if (!catalog || !status.exists || forceRefresh || isExpired) {
-    catalog = await refreshYanzhaoCatalog(options);
+  const countTooLow = Number(status.schoolCount || 0) > 0 && Number(status.schoolCount || 0) < minSchoolCount;
+  if (!catalog || !status.exists || forceRefresh || isExpired || countTooLow) {
+    catalog = await refreshYanzhaoCatalog({ ...options, minSchoolCount });
   }
   return normalizeYanzhaoCatalog(catalog);
 }

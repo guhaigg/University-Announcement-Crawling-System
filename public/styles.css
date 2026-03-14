@@ -3768,3 +3768,85 @@ button.danger {
     display: none !important;
   }
 }
+
+/* --- 2026-03 UX hotfix: 去重、可读性、长度控制 --- */
+.home-shell {
+  grid-template-columns: 198px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.workflow-strip::before {
+  display: none;
+}
+
+.function-drawer-card .module-tabs button {
+  color: #0f1b34;
+}
+
+.function-drawer-card .module-tabs button:hover:not(:disabled) {
+  color: #081124;
+}
+
+.function-drawer-card .module-tabs button.active,
+.function-drawer-card .module-tabs button.active:hover:not(:disabled) {
+  color: #ffffff;
+}
+
+#masthead-nav button {
+  color: #0f1b34;
+}
+
+#masthead-nav button.active,
+#masthead-nav button.active:hover:not(:disabled) {
+  color: #082349;
+}
+
+.workflow-step strong,
+.workflow-step p {
+  color: #0f172a;
+}
+
+.workflow-step.active strong,
+.workflow-step:hover strong,
+.workflow-step.active p,
+.workflow-step:hover p {
+  color: #0b1224;
+}
+
+#adjustment-quick-list,
+#news-quick-list,
+#adjustment-clean-quick-list {
+  max-height: 276px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+#adjustment-quick-list li strong,
+#news-quick-list li strong,
+#adjustment-clean-quick-list li strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#adjustment-major-test-school-picker {
+  margin-top: 10px;
+}
+
+.major-school-picker-list {
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.major-school-picker-list li label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.major-school-picker-list input[type='checkbox'] {
+  margin-top: 2px;
+}

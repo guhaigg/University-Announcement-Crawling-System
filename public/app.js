@@ -132,8 +132,14 @@ const adjustmentMajorTestMaxSchools = document.getElementById('adjustment-major-
 const adjustmentMajorTestMaxNotices = document.getElementById('adjustment-major-test-max-notices');
 const adjustmentMajorTestMaxMajors = document.getElementById('adjustment-major-test-max-majors');
 const adjustmentMajorTestRefreshBeforeRun = document.getElementById('adjustment-major-test-refresh-before-run');
+const adjustmentMajorTestMatchBtn = document.getElementById('adjustment-major-test-match-btn');
 const adjustmentMajorTestRunBtn = document.getElementById('adjustment-major-test-run-btn');
 const adjustmentMajorTestExportBtn = document.getElementById('adjustment-major-test-export-btn');
+const adjustmentMajorTestSchoolPicker = document.getElementById('adjustment-major-test-school-picker');
+const adjustmentMajorTestSchoolPickerSummary = document.getElementById('adjustment-major-test-school-picker-summary');
+const adjustmentMajorTestSchoolPickerList = document.getElementById('adjustment-major-test-school-picker-list');
+const adjustmentMajorTestPickAllBtn = document.getElementById('adjustment-major-test-pick-all');
+const adjustmentMajorTestPickInvertBtn = document.getElementById('adjustment-major-test-pick-invert');
 const adjustmentMajorTestResult = document.getElementById('adjustment-major-test-result');
 const adjustmentMajorTestSummary = document.getElementById('adjustment-major-test-summary');
 const adjustmentMajorTestMajorHits = document.getElementById('adjustment-major-test-major-hits');
@@ -189,6 +195,9 @@ let adjustmentMatch = null;
 let newsQueryState = null;
 let adjustmentCleanState = null;
 let adjustmentMajorTestState = null;
+let adjustmentMajorTestSchoolCandidates = [];
+let adjustmentMajorTestSelectedSchoolKeys = new Set();
+let adjustmentMajorTestPreviewSignature = '';
 let adjustmentMajorCacheState = null;
 let adjustmentCleanQuickSchools = [];
 let newsQuickSchools = [];
@@ -803,6 +812,105 @@ async function loadAdjustmentMajorTestCatalogStatus() {
   } catch (error) {
     adjustmentMajorTestStatus.textContent = `本地库状态读取失败：${error.message || '未知错误'}`;
   }
+}
+
+function buildAdjustmentMajorSchoolCandidateKey(school) {
+  const dwdm = String(school?.dwdm || '').trim();
+  if (dwdm) return dwdm;
+  return normalizeFilterText(school?.schoolName || school?.dwmc || '');
+}
+
+function collectAdjustmentMajorTestPayload() {
+  return {
+    majorKeyword: String(adjustmentMajorTestMajor?.value || '').trim(),
+    targetYear: String(adjustmentMajorTestYear?.value || '').trim(),
+    keywords: String(adjustmentMajorTestKeywords?.value || '').trim(),
+    maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 8),
+    maxNoticesPerSchool: Number(adjustmentMajorTestMaxNotices?.value || 14),
+    maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 8),
+    refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked)
+  };
+}
+
+function buildAdjustmentMajorTestPreviewSignature(payload) {
+  return JSON.stringify({
+    majorKeyword: String(payload?.majorKeyword || '').trim(),
+    targetYear: String(payload?.targetYear || '').trim(),
+    keywords: String(payload?.keywords || '').trim(),
+    maxSchools: Number(payload?.maxSchools || 0),
+    maxMajorCandidates: Number(payload?.maxMajorCandidates || 0),
+    refreshCatalog: Boolean(payload?.refreshCatalog)
+  });
+}
+
+function clearAdjustmentMajorTestSchoolPicker() {
+  adjustmentMajorTestSchoolCandidates = [];
+  adjustmentMajorTestSelectedSchoolKeys = new Set();
+  adjustmentMajorTestPreviewSignature = '';
+  if (adjustmentMajorTestSchoolPickerSummary) adjustmentMajorTestSchoolPickerSummary.textContent = '';
+  if (adjustmentMajorTestSchoolPickerList) adjustmentMajorTestSchoolPickerList.innerHTML = '';
+  if (adjustmentMajorTestSchoolPicker) adjustmentMajorTestSchoolPicker.classList.add('hidden');
+}
+
+function renderAdjustmentMajorTestSchoolPicker() {
+  if (!adjustmentMajorTestSchoolPicker || !adjustmentMajorTestSchoolPickerList || !adjustmentMajorTestSchoolPickerSummary) return;
+  if (!adjustmentMajorTestSchoolCandidates.length) {
+    adjustmentMajorTestSchoolPicker.classList.add('hidden');
+    adjustmentMajorTestSchoolPickerSummary.textContent = '';
+    adjustmentMajorTestSchoolPickerList.innerHTML = '';
+    return;
+  }
+
+  adjustmentMajorTestSchoolPicker.classList.remove('hidden');
+  const selectedCount = adjustmentMajorTestSelectedSchoolKeys.size;
+  adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校，当前勾选 ${selectedCount} 所。`;
+  adjustmentMajorTestSchoolPickerList.innerHTML = adjustmentMajorTestSchoolCandidates
+    .map((school) => {
+      const key = buildAdjustmentMajorSchoolCandidateKey(school);
+      const checked = adjustmentMajorTestSelectedSchoolKeys.has(key) ? 'checked' : '';
+      const majorHints = (Array.isArray(school.majorMatches) ? school.majorMatches : [])
+        .map((item) => item?.zymc || item?.zydm || '')
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(' / ');
+      return `<li>
+        <label>
+          <input type="checkbox" data-major-school-key="${escapeHtml(key)}" ${checked} />
+          <div class="news-item-main">
+            <span class="scan-title">${escapeHtml(school.schoolName || school.dwmc || '未命名院校')}</span>
+            ${school.ssmc ? `<span class="scan-date">地区：${escapeHtml(school.ssmc)}</span>` : ''}
+            ${school.dwdm ? `<span class="scan-date">代码：${escapeHtml(school.dwdm)}</span>` : ''}
+            ${majorHints ? `<span class="scan-date">匹配专业：${escapeHtml(majorHints)}</span>` : ''}
+          </div>
+        </label>
+      </li>`;
+    })
+    .join('');
+}
+
+function syncAdjustmentMajorTestSelectedSchools(checked, key) {
+  if (!key) return;
+  if (checked) adjustmentMajorTestSelectedSchoolKeys.add(key);
+  else adjustmentMajorTestSelectedSchoolKeys.delete(key);
+  if (adjustmentMajorTestSchoolPickerSummary) {
+    adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校，当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。`;
+  }
+}
+
+async function runAdjustmentMajorTestPreview(payload) {
+  const data = await api('/api/adjustment-major-test/query', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      previewOnly: true
+    })
+  });
+  const schools = Array.isArray(data?.result?.schoolCandidates) ? data.result.schoolCandidates : [];
+  adjustmentMajorTestSchoolCandidates = schools;
+  adjustmentMajorTestSelectedSchoolKeys = new Set(schools.map((item) => buildAdjustmentMajorSchoolCandidateKey(item)).filter(Boolean));
+  adjustmentMajorTestPreviewSignature = buildAdjustmentMajorTestPreviewSignature(payload);
+  renderAdjustmentMajorTestSchoolPicker();
+  return schools.length;
 }
 
 function getAdjustmentMajorCacheSelectedStat() {
@@ -3006,6 +3114,7 @@ if (adjustmentMajorTestRefreshBtn) {
       if (adjustmentMajorTestStatus) {
         adjustmentMajorTestStatus.textContent = formatAdjustmentMajorTestCatalogStatus(data.status || {});
       }
+      clearAdjustmentMajorTestSchoolPicker();
       showToast('研招网本地库刷新完成');
     } catch (error) {
       showToast(error.message, true);
@@ -3018,25 +3127,36 @@ if (adjustmentMajorTestRefreshBtn) {
 if (adjustmentMajorTestForm) {
   adjustmentMajorTestForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const majorKeyword = String(adjustmentMajorTestMajor?.value || '').trim();
-    if (!majorKeyword) {
+    const payload = collectAdjustmentMajorTestPayload();
+    if (!payload.majorKeyword) {
       showToast('请先填写专业关键词', true);
       return;
     }
-    const payload = {
-      majorKeyword,
-      targetYear: String(adjustmentMajorTestYear?.value || '').trim(),
-      keywords: String(adjustmentMajorTestKeywords?.value || '').trim(),
-      maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 8),
-      maxNoticesPerSchool: Number(adjustmentMajorTestMaxNotices?.value || 14),
-      maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 8),
-      refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked)
-    };
+    const signature = buildAdjustmentMajorTestPreviewSignature(payload);
+
     try {
+      if (!adjustmentMajorTestSchoolCandidates.length || signature !== adjustmentMajorTestPreviewSignature) {
+        setButtonBusy(adjustmentMajorTestRunBtn, true, '匹配院校中...');
+        const matchedCount = await runAdjustmentMajorTestPreview(payload);
+        if (!matchedCount) {
+          showToast('未匹配到可选院校，请调整专业关键词后重试', true);
+          return;
+        }
+        showToast('院校已匹配，请先勾选目标院校后再执行', false);
+        return;
+      }
+      const selectedSchools = Array.from(adjustmentMajorTestSelectedSchoolKeys);
+      if (!selectedSchools.length) {
+        showToast('请至少勾选 1 所院校后再执行', true);
+        return;
+      }
       setButtonBusy(adjustmentMajorTestRunBtn, true, '测试中...');
       const data = await api('/api/adjustment-major-test/query', {
         method: 'POST',
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          ...payload,
+          selectedSchools
+        })
       });
       renderAdjustmentMajorTestResult(data.result);
       await Promise.all([loadAdjustmentMajorTestCatalogStatus(), loadAdjustmentMajorTestCache()]);
@@ -3049,6 +3169,75 @@ if (adjustmentMajorTestForm) {
     }
   });
 }
+
+if (adjustmentMajorTestMatchBtn) {
+  adjustmentMajorTestMatchBtn.addEventListener('click', async () => {
+    const payload = collectAdjustmentMajorTestPayload();
+    if (!payload.majorKeyword) {
+      showToast('请先填写专业关键词', true);
+      return;
+    }
+    try {
+      setButtonBusy(adjustmentMajorTestMatchBtn, true, '匹配中...');
+      const matchedCount = await runAdjustmentMajorTestPreview(payload);
+      if (!matchedCount) {
+        showToast('未匹配到可选院校，请调整专业关键词后重试', true);
+        return;
+      }
+      showToast(`已匹配 ${matchedCount} 所院校，请勾选后执行专业测试`);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(adjustmentMajorTestMatchBtn, false);
+    }
+  });
+}
+
+if (adjustmentMajorTestSchoolPickerList) {
+  adjustmentMajorTestSchoolPickerList.addEventListener('change', (e) => {
+    const input = e.target.closest('input[data-major-school-key]');
+    if (!input) return;
+    const key = String(input.dataset.majorSchoolKey || '').trim();
+    syncAdjustmentMajorTestSelectedSchools(Boolean(input.checked), key);
+  });
+}
+
+if (adjustmentMajorTestPickAllBtn) {
+  adjustmentMajorTestPickAllBtn.addEventListener('click', () => {
+    adjustmentMajorTestSelectedSchoolKeys = new Set(
+      adjustmentMajorTestSchoolCandidates.map((item) => buildAdjustmentMajorSchoolCandidateKey(item)).filter(Boolean)
+    );
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+if (adjustmentMajorTestPickInvertBtn) {
+  adjustmentMajorTestPickInvertBtn.addEventListener('click', () => {
+    const nextSelected = new Set();
+    adjustmentMajorTestSchoolCandidates.forEach((item) => {
+      const key = buildAdjustmentMajorSchoolCandidateKey(item);
+      if (!key) return;
+      if (!adjustmentMajorTestSelectedSchoolKeys.has(key)) nextSelected.add(key);
+    });
+    adjustmentMajorTestSelectedSchoolKeys = nextSelected;
+    renderAdjustmentMajorTestSchoolPicker();
+  });
+}
+
+[
+  adjustmentMajorTestMajor,
+  adjustmentMajorTestYear,
+  adjustmentMajorTestKeywords,
+  adjustmentMajorTestMaxSchools,
+  adjustmentMajorTestMaxMajors,
+  adjustmentMajorTestRefreshBeforeRun
+].forEach((el) => {
+  if (!el) return;
+  const eventName = el.tagName === 'INPUT' && el.type === 'checkbox' ? 'change' : 'input';
+  el.addEventListener(eventName, () => {
+    clearAdjustmentMajorTestSchoolPicker();
+  });
+});
 
 if (adjustmentMajorTestSelectAll) {
   adjustmentMajorTestSelectAll.addEventListener('click', () => {

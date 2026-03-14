@@ -117,48 +117,11 @@
             <p class="subtitle hero-tip">如果你是第一次用，建议先从下面的“推荐回路”进入；如果你已经有固定学校，直接进“每日任务”会更高效。</p>
           </section>
 
-          <section class="card feature-showcase">
-            <h2>场景入口</h2>
-            <p class="subtitle">这些入口不是简单跳转，而是带着预设意图进入对应模块。适合把常见操作压缩成一键动作。</p>
-            <div class="feature-grid" id="feature-grid">
-              <button type="button" class="feature-card feature-card-primary" data-module="adjustment-module" data-adjustment-keywords="调剂,缺额,接受调剂" data-jump="true">
-                <span class="feature-kicker">Workflow</span>
-                <strong>调剂入口快速定位</strong>
-                <em>自动切到调剂导航并预填关键词，适合先找院校研招入口再做候选扫描。</em>
-              </button>
-              <button type="button" class="feature-card" data-module="news-query-module" data-focus="general" data-news-day="today" data-news-keyword="调剂,招生,公告" data-jump="true">
-                <span class="feature-kicker">Today</span>
-                <strong>今日新公告盯盘</strong>
-                <em>切到新公告查询并预设今日筛选，适合每天快速查看是否有新增研招信息。</em>
-              </button>
-              <button type="button" class="feature-card" data-module="news-query-module" data-focus="retest" data-news-day="today" data-news-keyword="复试,名单,资格审查" data-jump="true">
-                <span class="feature-kicker">Focus</span>
-                <strong>复试高频检索</strong>
-                <em>自动切到复试模式并预设关键词，优先筛查复试通知、名单和资格审查动态。</em>
-              </button>
-              <button type="button" class="feature-card" data-module="adjustment-clean-module" data-jump="true">
-                <span class="feature-kicker">Clean</span>
-                <strong>调剂数据清洗</strong>
-                <em>对抓取结果做来源归类、关键词匹配与名额提取，提升后续检索命中率。</em>
-              </button>
-              <button type="button" class="feature-card" data-module="adjustment-major-test-module" data-jump="true">
-                <span class="feature-kicker">Major</span>
-                <strong>按专业反查机会</strong>
-                <em>进入专业调剂测试模块，从专业库反推院校并结合官网正文做二次匹配。</em>
-              </button>
-              <button type="button" class="feature-card" data-module="daily-module" data-jump="true">
-                <span class="feature-kicker">Automation</span>
-                <strong>每日任务与归档</strong>
-                <em>查看或维护自动任务，把长期跟踪院校的结果持续沉淀到 Markdown 输出区。</em>
-              </button>
-            </div>
-          </section>
-
           <section class="workflow-strip" id="workflow-strip" aria-label="推荐工作流">
             <div class="workflow-strip-head">
               <span class="section-label">Recommended Loop</span>
               <h3>一条完整的研招作业回路</h3>
-              <p class="subtitle">如果你每天都在看调剂、复试或招生公告，按这条路线走会比逐个模块摸索顺很多。</p>
+              <p class="subtitle">把原来的“场景入口”和“推荐回路”合并为这一条主路径，减少重复入口与决策负担。</p>
             </div>
             <div class="workflow-grid">
               <button type="button" class="workflow-step" data-module="adjustment-module" data-jump="true">
@@ -522,12 +485,21 @@
           </label>
           <div class="actions inline-actions">
             <button type="button" id="adjustment-major-test-refresh-btn" class="muted">刷新研招网本地库</button>
+            <button type="button" id="adjustment-major-test-match-btn" class="muted">先匹配院校</button>
             <button type="submit" id="adjustment-major-test-run-btn">执行专业测试</button>
             <button type="button" id="adjustment-major-test-export-btn" class="muted">导出选中为 Markdown</button>
           </div>
         </form>
 
         <p class="subtitle quick-editor-tip" id="adjustment-major-test-status">本地库状态：读取中...</p>
+        <div id="adjustment-major-test-school-picker" class="verify-panel hidden">
+          <p id="adjustment-major-test-school-picker-summary" class="subtitle"></p>
+          <div class="actions inline-actions">
+            <button type="button" id="adjustment-major-test-pick-all" class="muted">全选院校</button>
+            <button type="button" id="adjustment-major-test-pick-invert" class="muted">反选院校</button>
+          </div>
+          <ul id="adjustment-major-test-school-picker-list" class="scan-list major-school-picker-list"></ul>
+        </div>
 
         <div id="adjustment-major-test-result" class="verify-panel hidden">
           <p id="adjustment-major-test-summary" class="subtitle"></p>
