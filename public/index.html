@@ -814,7 +814,7 @@
         </div>
       </section>
 
-      <div id="toast" class="toast"></div>
+      <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     </main>
 
     <div id="auth-modal" class="auth-modal hidden">
@@ -830,7 +830,7 @@
             密码
             <input id="login-password" type="password" autocomplete="current-password" required placeholder="请输入密码" />
           </label>
-          <p id="login-error" class="error-text"></p>
+          <p id="login-error" class="error-text" role="alert" aria-live="assertive" aria-atomic="true"></p>
           <div class="actions">
             <button type="submit" id="login-submit-btn">登录</button>
           </div>

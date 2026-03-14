@@ -199,6 +199,10 @@ let editingAdjustmentCleanQuickId = '';
 let activeModuleId = 'daily-module';
 let activeNewsQueryFocus = String(newsQueryFocus?.value || 'general') === 'retest' ? 'retest' : 'general';
 let currentUser = null;
+let parallaxBound = false;
+let parallaxTicking = false;
+let parallaxItems = [];
+const navLiquidState = new WeakMap();
 
 const paginationState = {
   scan: { page: 1, pageSize: 20 },
@@ -527,7 +531,7 @@ function renderNewsQueryList() {
         </div>
         <div class="news-item-actions">
           <button type="button" class="muted" data-action="preview-news-link" data-url="${encodeURIComponent(item.url || '')}" data-title="${encodeURIComponent(item.title || '')}">页内浏览</button>
-          <a href="${safeUrl}" target="_blank">新窗口打开</a>
+          <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">新窗口打开</a>
         </div>
       </li>`;
     })
@@ -596,7 +600,7 @@ function renderNewsQueryResult(result) {
       newsQueryHomepage.innerHTML = `<strong>查询范围：</strong>固定院校一键查询（${newsQueryState.summary?.succeeded || 0}/${newsQueryState.summary?.requested || 0} 所成功）`;
     } else {
       newsQueryHomepage.innerHTML = homepageUrl
-        ? `<strong>匹配官网：</strong><a href="${escapeHtml(homepageUrl)}" target="_blank">${escapeHtml(homepageUrl)}</a>`
+        ? `<strong>匹配官网：</strong><a href="${escapeHtml(homepageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(homepageUrl)}</a>`
         : '<strong>匹配官网：</strong>未匹配';
     }
   }
@@ -608,7 +612,7 @@ function renderNewsQueryResult(result) {
         : '<strong>失败院校：</strong>无';
     } else {
       newsQueryCollegeHomepage.innerHTML = collegeHomepageUrl
-        ? `<strong>匹配学院官网：</strong><a href="${escapeHtml(collegeHomepageUrl)}" target="_blank">${escapeHtml(collegeHomepageUrl)}</a>`
+        ? `<strong>匹配学院官网：</strong><a href="${escapeHtml(collegeHomepageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(collegeHomepageUrl)}</a>`
         : `<strong>匹配学院官网：</strong>${newsQueryState.collegeName ? '未匹配' : '未填写学院名称'}`;
     }
   }
@@ -732,7 +736,7 @@ function renderAdjustmentCleanList() {
             ${excerpt ? `<span class="scan-date news-snippet">摘要：${excerpt}</span>` : ''}
           </div>
         </label>
-        <a href="${escapeHtml(item.url)}" target="_blank">打开链接</a>
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">打开链接</a>
       </li>`;
     })
     .join('');
@@ -1022,7 +1026,7 @@ function renderAdjustmentMajorTestList() {
             ${item.excerpt ? `<span class="scan-date news-snippet">摘要：${escapeHtml(item.excerpt)}</span>` : ''}
           </div>
         </label>
-        <a href="${escapeHtml(item.url)}" target="_blank">打开链接</a>
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">打开链接</a>
       </li>`;
     })
     .join('');
@@ -1504,10 +1508,10 @@ function renderAdjustmentMatch(profile) {
   adjustmentResult.classList.remove('hidden');
   const collegeLabel = adjustmentMatch.collegeName ? ` | 学院：${adjustmentMatch.collegeName}` : '';
   adjustmentSummary.textContent = `院校：${adjustmentMatch.schoolName}${collegeLabel} | 公告候选：${adjustmentMatch.announcementCandidates?.length || 0} | 学院候选：${adjustmentMatch.collegeCandidates?.length || 0}`;
-  adjustmentHomepage.innerHTML = `<strong>匹配官网：</strong><a href="${escapeHtml(adjustmentMatch.homepageUrl || '')}" target="_blank">${escapeHtml(adjustmentMatch.homepageUrl || '')}</a>`;
+  adjustmentHomepage.innerHTML = `<strong>匹配官网：</strong><a href="${escapeHtml(adjustmentMatch.homepageUrl || '')}" target="_blank" rel="noopener noreferrer">${escapeHtml(adjustmentMatch.homepageUrl || '')}</a>`;
   const collegeHomepageUrl = adjustmentMatch.collegeProfile?.matchedHomepageUrl || '';
   if (collegeHomepageUrl) {
-    adjustmentCollegeHomepage.innerHTML = `<strong>匹配学院官网：</strong><a href="${escapeHtml(collegeHomepageUrl)}" target="_blank">${escapeHtml(collegeHomepageUrl)}</a>`;
+    adjustmentCollegeHomepage.innerHTML = `<strong>匹配学院官网：</strong><a href="${escapeHtml(collegeHomepageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(collegeHomepageUrl)}</a>`;
   } else if (adjustmentMatch.collegeName) {
     adjustmentCollegeHomepage.innerHTML = `<strong>匹配学院官网：</strong>未匹配到“${escapeHtml(adjustmentMatch.collegeName)}”独立站点`;
   } else {
@@ -1629,6 +1633,66 @@ function normalizeNewsFocus(value) {
   return String(value || 'general') === 'retest' ? 'retest' : 'general';
 }
 
+function isLiquidNavContainer(container) {
+  return Boolean(container && (container === moduleTabs || container === mastheadNav));
+}
+
+function ensureNavLiquidIndicator(container) {
+  if (!isLiquidNavContainer(container)) return null;
+  let indicator = navLiquidState.get(container);
+  if (indicator && indicator.isConnected) return indicator;
+  indicator = document.createElement('span');
+  indicator.className = 'nav-liquid-indicator';
+  indicator.setAttribute('aria-hidden', 'true');
+  container.classList.add('has-liquid-indicator');
+  container.appendChild(indicator);
+  navLiquidState.set(container, indicator);
+  return indicator;
+}
+
+function updateNavLiquidIndicator(container, preferredButton = null) {
+  if (!isLiquidNavContainer(container)) return;
+  const indicator = ensureNavLiquidIndicator(container);
+  if (!indicator) return;
+  const target =
+    preferredButton && container.contains(preferredButton)
+      ? preferredButton
+      : container.querySelector('[data-module].active');
+  if (!target) {
+    indicator.style.opacity = '0';
+    return;
+  }
+  const containerRect = container.getBoundingClientRect();
+  const buttonRect = target.getBoundingClientRect();
+  const left = buttonRect.left - containerRect.left;
+  const top = buttonRect.top - containerRect.top;
+  indicator.style.opacity = '1';
+  indicator.style.width = `${Math.max(12, buttonRect.width)}px`;
+  indicator.style.height = `${Math.max(12, buttonRect.height)}px`;
+  indicator.style.transform = `translate3d(${left.toFixed(2)}px, ${top.toFixed(2)}px, 0)`;
+}
+
+function refreshNavLiquidIndicators() {
+  [moduleTabs, mastheadNav].forEach((container) => {
+    updateNavLiquidIndicator(container);
+  });
+}
+
+function bindNavLiquid(container) {
+  if (!isLiquidNavContainer(container)) return;
+  ensureNavLiquidIndicator(container);
+  container.addEventListener('pointerover', (e) => {
+    const btn = e.target.closest('[data-module]');
+    if (!btn || !container.contains(btn)) return;
+    updateNavLiquidIndicator(container, btn);
+  });
+  container.addEventListener('pointerout', (e) => {
+    const next = e.relatedTarget;
+    if (next && container.contains(next)) return;
+    updateNavLiquidIndicator(container);
+  });
+}
+
 function syncModuleTabsActiveState() {
   activeNewsQueryFocus = normalizeNewsFocus(newsQueryFocus?.value || activeNewsQueryFocus);
   [mastheadNav, moduleTabs, featureGrid, heroActions, workflowStrip].forEach((container) => {
@@ -1644,6 +1708,7 @@ function syncModuleTabsActiveState() {
       btn.classList.toggle('active', targetModule === activeModuleId);
     });
   });
+  refreshNavLiquidIndicators();
 }
 
 function applyScenarioPreset(btn) {
@@ -1703,6 +1768,49 @@ function bindModuleNavigation(container) {
   });
 }
 
+function collectParallaxItems() {
+  parallaxItems = [
+    { element: document.querySelector('.hero-card'), factor: -0.08 },
+    { element: document.querySelector('.feature-showcase'), factor: -0.05 },
+    { element: document.querySelector('.workflow-strip'), factor: -0.035 }
+  ].filter((item) => item.element);
+}
+
+function applyScrollParallax() {
+  parallaxTicking = false;
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rawY = reduced ? 0 : window.scrollY || window.pageYOffset || 0;
+  const y = Math.max(0, Math.min(1400, rawY));
+  parallaxItems.forEach((item) => {
+    const offset = (y * item.factor).toFixed(2);
+    item.element.style.setProperty('--parallax-offset', `${offset}px`);
+  });
+}
+
+function requestParallaxFrame() {
+  if (parallaxTicking) return;
+  parallaxTicking = true;
+  window.requestAnimationFrame(applyScrollParallax);
+}
+
+function bindScrollParallax() {
+  if (parallaxBound) return;
+  parallaxBound = true;
+  collectParallaxItems();
+  if (!parallaxItems.length) return;
+  const onScrollLike = () => requestParallaxFrame();
+  window.addEventListener('scroll', onScrollLike, { passive: true });
+  if (window.matchMedia) {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', onScrollLike);
+    } else if (typeof media.addListener === 'function') {
+      media.addListener(onScrollLike);
+    }
+  }
+  requestParallaxFrame();
+}
+
 function applyNewsQueryFocusUI(focusLike) {
   const focus = normalizeNewsFocus(focusLike);
   activeNewsQueryFocus = focus;
@@ -1745,7 +1853,7 @@ function toLocalText(iso) {
 function renderTaskCard(task) {
   const matched = Number.isFinite(task.lastMatchedCount) ? task.lastMatchedCount : 0;
   const fileLink = task.lastResultFile
-    ? `<a href="/api/files/${encodeURIComponent(task.lastResultFile)}" target="_blank">${escapeHtml(task.lastResultFile)}</a>`
+    ? `<a href="/api/files/${encodeURIComponent(task.lastResultFile)}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.lastResultFile)}</a>`
     : '-';
   const stateText = task.enabled ? '已开启' : '已暂停';
 
@@ -1766,7 +1874,7 @@ function renderTaskCard(task) {
   const lastResultFiles = Array.isArray(task.lastResultFiles) ? task.lastResultFiles : [];
   const fileText =
     lastResultFiles.length > 1
-      ? `${lastResultFiles.length} 个文件（首个：<a href="/api/files/${encodeURIComponent(lastResultFiles[0])}" target="_blank">${escapeHtml(
+      ? `${lastResultFiles.length} 个文件（首个：<a href="/api/files/${encodeURIComponent(lastResultFiles[0])}" target="_blank" rel="noopener noreferrer">${escapeHtml(
           lastResultFiles[0]
         )}</a>）`
       : fileLink;
@@ -1777,8 +1885,8 @@ function renderTaskCard(task) {
         <h3>${safeName}</h3>
         <span class="tag ${task.enabled ? 'ok' : 'stop'}">${stateText}</span>
       </div>
-      <p><strong>官网：</strong><a href="${safeHomepage}" target="_blank">${safeHomepage}</a></p>
-      <p><strong>公告页：</strong>${task.announcementUrl ? `<a href="${safeAnnouncement}" target="_blank">${safeAnnouncement}</a>${announcementText ? `（${escapeHtml(announcementText)}）` : ''}` : '自动发现'}</p>
+      <p><strong>官网：</strong><a href="${safeHomepage}" target="_blank" rel="noopener noreferrer">${safeHomepage}</a></p>
+      <p><strong>公告页：</strong>${task.announcementUrl ? `<a href="${safeAnnouncement}" target="_blank" rel="noopener noreferrer">${safeAnnouncement}</a>${announcementText ? `（${escapeHtml(announcementText)}）` : ''}` : '自动发现'}</p>
       <p><strong>模式：</strong>${getModeLabel(crawlMode)}${crawlMode === 'graduate_adjustment' ? ` / 学院层级${includeCollegePages ? '开启' : '关闭'}` : ''}</p>
       <p><strong>输出：</strong>${outputModeText}</p>
       <p><strong>学院链接：</strong>${collegeCount ? `${collegeCount} 个` : '自动发现'}</p>
@@ -1916,7 +2024,7 @@ function renderPendingScanList() {
           ${badge}
           ${sourceText}
         </label>
-        <a href="${escapeHtml(item.url)}" target="_blank">打开链接</a>
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">打开链接</a>
       </li>`;
     })
     .join('');
@@ -2045,7 +2153,7 @@ function renderFilesPage() {
       const checked = selectedFileNames.has(f.name) ? 'checked' : '';
       return `<li>
         <input type="checkbox" data-file-checkbox="true" data-name="${encodeURIComponent(f.name)}" ${checked} />
-        <a href="/api/files/${encodeURIComponent(f.name)}" target="_blank">${escapeHtml(f.name)}</a>
+        <a href="/api/files/${encodeURIComponent(f.name)}" target="_blank" rel="noopener noreferrer">${escapeHtml(f.name)}</a>
         <span>${sizeKb}KB / ${toLocalText(f.updatedAt)}</span>
         <button type="button" data-action="reveal-file" data-name="${encodeURIComponent(f.name)}" class="muted">查看本地</button>
         <button type="button" data-action="preview-file" data-name="${encodeURIComponent(f.name)}">预览</button>
@@ -3277,6 +3385,13 @@ bindModuleNavigation(featureGrid);
 bindModuleNavigation(mastheadNav);
 bindModuleNavigation(heroActions);
 bindModuleNavigation(workflowStrip);
+bindNavLiquid(moduleTabs);
+bindNavLiquid(mastheadNav);
+bindScrollParallax();
+window.addEventListener('resize', () => {
+  refreshNavLiquidIndicators();
+  requestParallaxFrame();
+});
 
 if (loginForm) {
   loginForm.addEventListener('submit', async (e) => {
