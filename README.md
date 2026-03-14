@@ -268,6 +268,12 @@ npm run dev
 npm run check
 npm run review
 npm run readme:update
+npm run mysql:start
+npm run mysql:stop
+npm run mysql:bootstrap
+npm run mysql:autostart:install
+npm run mysql:autostart:status
+npm run mysql:autostart:remove
 ```
 
 说明：
@@ -275,7 +281,26 @@ npm run readme:update
 - `npm run check`：语法审核（`server.js` + `public/app.js`）
 - `npm run review`：等价于 `npm run check`
 - `npm run readme:update`：只刷新 README 的自动审核记录
+- `npm run mysql:autostart:install`：安装 MySQL 自启任务（默认“登录后自启”）
+- `npm run mysql:autostart:status`：查看自启任务状态
+- `npm run mysql:autostart:remove`：移除自启任务
 - 已配置 `postcheck`，每次 `npm run check` 后会自动更新本 README 的“自动审核记录”
+
+## 2026-03-14 20:06 (+08:00) 更新记录（任务计划程序自启）
+
+- 更新内容
+  - 新增 MySQL “任务计划程序自启”能力，支持 `登录后自启(Logon)` 和 `开机自启(Startup)` 两种模式。
+  - 新增自启管理脚本：安装、状态查询、移除。
+- 修改情况
+  - 脚本文件：`scripts/mysql-autostart-install.ps1`、`scripts/mysql-autostart-status.ps1`、`scripts/mysql-autostart-remove.ps1`
+  - 配置文件：`package.json`（新增 npm 命令）
+  - 兼容性：不影响现有手动启动流程；仅新增可选能力。
+- 使用方法
+  1. 安装默认自启任务（登录后）：`npm run mysql:autostart:install`
+  2. 查看任务状态：`npm run mysql:autostart:status`
+  3. 如需开机自启（SYSTEM）：`powershell -ExecutionPolicy Bypass -File .\\scripts\\mysql-autostart-install.ps1 -Mode Startup`
+  4. 移除任务：`npm run mysql:autostart:remove`
+  5. 如果提示 `Access is denied`，请用“管理员身份”打开 PowerShell 后重试。
 
 ## 2026-03-14 19:40 (+08:00) 更新记录（数据库）
 
@@ -347,9 +372,9 @@ GitHub Actions 已配置：
 ## 自动审核记录
 
 <!-- AUTO_REVIEW_START -->
-- 最近审核时间：2026-03-14 19:34:14（Asia/Shanghai）
+- 最近审核时间：2026-03-14 19:43:58（Asia/Shanghai）
 - 审核命令：`npm run check`
 - 当前分支：codex/uacs-maintenance-20260314
-- 最近提交：71a8dd4 feat: 完成首页去重与专业院校勾选测试流程
+- 最近提交：9753385 feat: 支持 MySQL 存储后端并补充部署脚本与文档
 - 当前工作区变更数：0
 <!-- AUTO_REVIEW_END -->

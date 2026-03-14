@@ -12,7 +12,10 @@
     "readme:update": "node scripts/update-readme.js",
     "mysql:start": "powershell -ExecutionPolicy Bypass -File scripts/mysql-start.ps1",
     "mysql:stop": "powershell -ExecutionPolicy Bypass -File scripts/mysql-stop.ps1",
-    "mysql:bootstrap": "powershell -ExecutionPolicy Bypass -File scripts/mysql-bootstrap.ps1"
+    "mysql:bootstrap": "powershell -ExecutionPolicy Bypass -File scripts/mysql-bootstrap.ps1",
+    "mysql:autostart:install": "powershell -ExecutionPolicy Bypass -File scripts/mysql-autostart-install.ps1",
+    "mysql:autostart:status": "powershell -ExecutionPolicy Bypass -File scripts/mysql-autostart-status.ps1",
+    "mysql:autostart:remove": "powershell -ExecutionPolicy Bypass -File scripts/mysql-autostart-remove.ps1"
   },
   "dependencies": {
     "axios": "^1.9.0",
