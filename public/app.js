@@ -208,6 +208,7 @@ let adjustmentMajorTestState = null;
 let adjustmentMajorTestSchoolCandidates = [];
 let adjustmentMajorTestSelectedSchoolKeys = new Set();
 let adjustmentMajorTestPreviewSignature = '';
+let adjustmentMajorTestPreviewMeta = null;
 let adjustmentMajorCacheState = null;
 let adjustmentPrioritySchools = [];
 let adjustmentPriorityBuiltinRuleCount = 50;
@@ -854,9 +855,9 @@ function collectAdjustmentMajorTestPayload() {
     majorKeyword: String(adjustmentMajorTestMajor?.value || '').trim(),
     targetYear: String(adjustmentMajorTestYear?.value || '').trim(),
     keywords: String(adjustmentMajorTestKeywords?.value || '').trim(),
-    maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 20),
+    maxSchools: Number(adjustmentMajorTestMaxSchools?.value || 100),
     maxNoticesPerSchool: Number(adjustmentMajorTestMaxNotices?.value || 14),
-    maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 8),
+    maxMajorCandidates: Number(adjustmentMajorTestMaxMajors?.value || 16),
     refreshCatalog: Boolean(adjustmentMajorTestRefreshBeforeRun?.checked),
     usePrioritySchools: adjustmentMajorTestUsePriority ? Boolean(adjustmentMajorTestUsePriority.checked) : true
   };
@@ -874,10 +875,20 @@ function buildAdjustmentMajorTestPreviewSignature(payload) {
   });
 }
 
+function buildAdjustmentMajorShardWarning(summaryLike) {
+  const summary = summaryLike || {};
+  if (!summary.provinceShardTriggered) return '';
+  const majorCount = Number(summary.provinceShardMajorCount || 0);
+  const provinceCount = Number(summary.provinceShardScannedProvinces || 0);
+  const addedSchools = Number(summary.provinceShardAddedSchools || 0);
+  return `告警：检测到深层分页限制，已自动切换至省份级矩阵扫描（触发专业 ${majorCount} 个，扫描省份 ${provinceCount} 个，补充院校 ${addedSchools} 所）。`;
+}
+
 function clearAdjustmentMajorTestSchoolPicker() {
   adjustmentMajorTestSchoolCandidates = [];
   adjustmentMajorTestSelectedSchoolKeys = new Set();
   adjustmentMajorTestPreviewSignature = '';
+  adjustmentMajorTestPreviewMeta = null;
   if (adjustmentMajorTestSchoolPickerSummary) adjustmentMajorTestSchoolPickerSummary.textContent = '';
   if (adjustmentMajorTestSchoolPickerList) adjustmentMajorTestSchoolPickerList.innerHTML = '';
   if (adjustmentMajorTestSchoolPicker) adjustmentMajorTestSchoolPicker.classList.add('hidden');
@@ -895,7 +906,11 @@ function renderAdjustmentMajorTestSchoolPicker() {
   adjustmentMajorTestSchoolPicker.classList.remove('hidden');
   const selectedCount = adjustmentMajorTestSelectedSchoolKeys.size;
   const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
-  adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校（白名单补强 ${priorityCount} 所），当前勾选 ${selectedCount} 所。`;
+  const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || adjustmentMajorTestSchoolCandidates.length || 0);
+  const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
+  adjustmentMajorTestSchoolPickerSummary.textContent =
+    `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，白名单补强 ${priorityCount} 所），当前勾选 ${selectedCount} 所。` +
+    (shardWarning ? ` ${shardWarning}` : '');
   adjustmentMajorTestSchoolPickerList.innerHTML = adjustmentMajorTestSchoolCandidates
     .map((school) => {
       const key = buildAdjustmentMajorSchoolCandidateKey(school);
@@ -930,7 +945,11 @@ function syncAdjustmentMajorTestSelectedSchools(checked, key) {
   else adjustmentMajorTestSelectedSchoolKeys.delete(key);
   if (adjustmentMajorTestSchoolPickerSummary) {
     const priorityCount = adjustmentMajorTestSchoolCandidates.filter((item) => Boolean(item?.priority)).length;
-    adjustmentMajorTestSchoolPickerSummary.textContent = `已匹配 ${adjustmentMajorTestSchoolCandidates.length} 所院校（白名单补强 ${priorityCount} 所），当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。`;
+    const catalogSchoolBase = Number(adjustmentMajorTestPreviewMeta?.catalogSchoolBase || adjustmentMajorTestSchoolCandidates.length || 0);
+    const shardWarning = buildAdjustmentMajorShardWarning(adjustmentMajorTestPreviewMeta);
+    adjustmentMajorTestSchoolPickerSummary.textContent =
+      `已匹配候选院校 ${adjustmentMajorTestSchoolCandidates.length} 所（开设院校基数 ${catalogSchoolBase} 所，白名单补强 ${priorityCount} 所），当前勾选 ${adjustmentMajorTestSelectedSchoolKeys.size} 所。` +
+      (shardWarning ? ` ${shardWarning}` : '');
   }
 }
 
@@ -943,8 +962,10 @@ async function runAdjustmentMajorTestPreview(payload) {
     })
   });
   const schools = Array.isArray(data?.result?.schoolCandidates) ? data.result.schoolCandidates : [];
+  const summary = data?.result?.summary || {};
   adjustmentMajorTestSchoolCandidates = schools;
   adjustmentMajorTestSelectedSchoolKeys = new Set(schools.map((item) => buildAdjustmentMajorSchoolCandidateKey(item)).filter(Boolean));
+  adjustmentMajorTestPreviewMeta = summary;
   adjustmentMajorTestPreviewSignature = buildAdjustmentMajorTestPreviewSignature(payload);
   renderAdjustmentMajorTestSchoolPicker();
   return schools.length;
@@ -1114,8 +1135,12 @@ function refreshAdjustmentMajorTestSummary() {
   const majorCandidates = Array.isArray(adjustmentMajorTestState.majorCandidates) ? adjustmentMajorTestState.majorCandidates : [];
   const filteredCount = Array.isArray(adjustmentMajorTestState.filteredItems) ? adjustmentMajorTestState.filteredItems.length : 0;
   const selectedCount = getSelectedAdjustmentMajorTestItems().length;
+  const catalogSchoolBase = Number(summary.catalogSchoolBase || summary.schoolsFromCatalog || 0);
+  const candidatePool = Number(summary.schoolsFromCatalog || 0);
+  const parsedSchools = Number(summary.schoolsParsed || summary.schoolsScanned || 0);
+  const shardWarning = buildAdjustmentMajorShardWarning(summary);
   adjustmentMajorTestSummary.textContent =
-    `匹配院校 ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
+    `开设院校基数 ${catalogSchoolBase} 所，候选院校池 ${candidatePool} 所，执行抓取 ${parsedSchools} 所，命中公告院校 ${summary.schoolsWithResult || 0} 所，失败 ${summary.failedSchools || 0} 所，` +
     `公告命中 ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条），当前显示 ${filteredCount} 条，已勾选 ${selectedCount} 条。` +
     `历史辅助：院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条；` +
     `白名单补强：${summary.prioritySchoolSeeds || 0} 所（预置 ${summary.builtinPriorityRules || 0} / 自定义 ${summary.userPrioritySchools || 0}）。`;
@@ -1130,7 +1155,8 @@ function refreshAdjustmentMajorTestSummary() {
     ? '本次未抓到新内容，已直接展示历史清洗缓存。'
     : `本次新抓取 ${summary.freshNotices || 0} 条，并融合历史缓存辅助展示。`;
   adjustmentMajorTestMajorHits.textContent =
-    `专业关键词：${query.majorKeyword || '-'}；年份：${query.targetYear || '-'}；候选专业：${majorText}；${cacheModeText}`;
+    `专业关键词：${query.majorKeyword || '-'}；年份：${query.targetYear || '-'}；候选专业：${majorText}；${cacheModeText}` +
+    (shardWarning ? `；${shardWarning}` : '');
 }
 
 function renderAdjustmentMajorTestList() {
@@ -1195,6 +1221,7 @@ function renderAdjustmentMajorTestResult(result) {
         selectedIds: new Set()
       }
     : null;
+  adjustmentMajorTestPreviewMeta = result?.summary || null;
 
   ensurePagerState('adjustmentMajorTest').page = 1;
   if (!adjustmentMajorTestState) {
@@ -3351,7 +3378,8 @@ if (adjustmentMajorTestForm) {
           showToast('未匹配到可选院校，请调整专业关键词后重试', true);
           return;
         }
-        showToast('院校已匹配，请先勾选目标院校后再执行', false);
+        const shardHint = adjustmentMajorTestPreviewMeta?.provinceShardTriggered ? '（已触发省份分片补抓）' : '';
+        showToast(`院校已匹配${shardHint}，请先勾选目标院校后再执行`, false);
         return;
       }
       const selectedSchools = Array.from(adjustmentMajorTestSelectedSchoolKeys);
@@ -3370,7 +3398,8 @@ if (adjustmentMajorTestForm) {
       renderAdjustmentMajorTestResult(data.result);
       await Promise.all([loadAdjustmentMajorTestCatalogStatus(), loadAdjustmentMajorTestCache()]);
       switchModule('adjustment-major-test-module');
-      showToast(`专业测试完成：命中 ${data.result?.summary?.totalNotices || 0} 条`);
+      const shardHint = data.result?.summary?.provinceShardTriggered ? '（已触发省份分片补抓）' : '';
+      showToast(`专业测试完成：命中 ${data.result?.summary?.totalNotices || 0} 条${shardHint}`);
     } catch (error) {
       showToast(error.message, true);
     } finally {
@@ -3393,7 +3422,8 @@ if (adjustmentMajorTestMatchBtn) {
         showToast('未匹配到可选院校，请调整专业关键词后重试', true);
         return;
       }
-      showToast(`已匹配 ${matchedCount} 所院校，请勾选后执行专业测试`);
+      const shardHint = adjustmentMajorTestPreviewMeta?.provinceShardTriggered ? '（已触发省份分片补抓）' : '';
+      showToast(`已匹配 ${matchedCount} 所院校${shardHint}，请勾选后执行专业测试`);
     } catch (error) {
       showToast(error.message, true);
     } finally {

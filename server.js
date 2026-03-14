@@ -95,6 +95,12 @@ const ADJUSTMENT_SOURCE_LABELS = {
 const YANZHAO_BASE_URL = 'https://yz.chsi.com.cn';
 const YANZHAO_CATALOG_MAX_AGE_MS = 72 * 60 * 60 * 1000;
 const YANZHAO_MIN_SCHOOL_COUNT = 600;
+const YANZHAO_PROVINCE_SHARD_DELAY_MIN_MS = Math.max(200, Number(process.env.YANZHAO_PROVINCE_SHARD_DELAY_MIN_MS) || 500);
+const YANZHAO_PROVINCE_SHARD_DELAY_MAX_MS = Math.max(
+  YANZHAO_PROVINCE_SHARD_DELAY_MIN_MS,
+  Number(process.env.YANZHAO_PROVINCE_SHARD_DELAY_MAX_MS) || 1500
+);
+const YANZHAO_PROVINCE_SHARD_MAX_PAGES = Math.max(1, Math.min(12, Number(process.env.YANZHAO_PROVINCE_SHARD_MAX_PAGES) || 8));
 const ADJUSTMENT_MAJOR_TEST_CACHE_LIMIT = 40;
 const ADJUSTMENT_MAJOR_TEST_CACHE_ITEM_LIMIT = 260;
 const YANZHAO_PROVINCE_LIST = [
@@ -3915,7 +3921,7 @@ function normalizeAdjustmentMajorCacheRecord(recordLike) {
     checkedAt: String(record.checkedAt || nowIsoSafe()),
     query: {
       keywords: parseKeywords(record?.query?.keywords || []),
-      maxSchools: Math.max(1, Math.min(20, Number(record?.query?.maxSchools) || 8)),
+      maxSchools: Math.max(1, Math.min(300, Number(record?.query?.maxSchools) || 100)),
       maxNoticesPerSchool: Math.max(4, Math.min(36, Number(record?.query?.maxNoticesPerSchool) || 14)),
       forceRefresh: normalizeBooleanFlag(record?.query?.forceRefresh, false)
     },
@@ -4292,7 +4298,7 @@ function buildAdjustmentMajorResultFromCacheOnly(options = {}, catalogStatus = {
   const majorKeyword = String(options.majorKeyword || '').trim();
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const keywords = parseKeywords(options.keywords || []);
-  const maxSchools = Math.max(1, Math.min(20, Number(options.maxSchools) || 8));
+  const maxSchools = Math.max(1, Math.min(300, Number(options.maxSchools) || 100));
   const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
   const limit = Math.max(40, maxSchools * maxNoticesPerSchool);
   const items = mergeAdjustmentMajorItemsWithCache([], cachedItems, limit);
@@ -4307,10 +4313,13 @@ function buildAdjustmentMajorResultFromCacheOnly(options = {}, catalogStatus = {
     summary: { scanned: 0, matched: 0, withQuota: 0, withAttachment: 0 },
     error: ''
   }));
+  const schoolsWithResult = new Set(items.map((item) => normalizeMatchText(item.schoolName || ''))).size;
   const summary = {
+    catalogSchoolBase: schools.length,
     schoolsFromCatalog: schools.length,
+    schoolsParsed: schools.length,
     schoolsScanned: schools.length,
-    schoolsWithResult: new Set(items.map((item) => normalizeMatchText(item.schoolName || ''))).size,
+    schoolsWithResult,
     failedSchools: 0,
     totalNotices: items.length,
     withQuota: items.filter((item) => Array.isArray(item.quotaNumbers) && item.quotaNumbers.length > 0).length,
@@ -4318,7 +4327,12 @@ function buildAdjustmentMajorResultFromCacheOnly(options = {}, catalogStatus = {
     cacheAssistSchools: cachedSchools.length,
     cacheAssistItems: cachedItems.length,
     usedCacheFallback: true,
-    freshNotices: 0
+    freshNotices: 0,
+    provinceShardTriggered: false,
+    provinceShardMajorCount: 0,
+    provinceShardScannedProvinces: 0,
+    provinceShardAddedSchools: 0,
+    provinceShardBlockedHits: 0
   };
   return {
     checkedAt: nowIsoSafe(),
@@ -4334,6 +4348,7 @@ function buildAdjustmentMajorResultFromCacheOnly(options = {}, catalogStatus = {
     majorCandidates: (cachedRecords[0]?.majorCandidates || []).slice(0, 12),
     schools,
     summary,
+    warnings: [],
     items
   };
 }
@@ -4442,7 +4457,12 @@ async function postYanzhaoForm(endpoint, formData, sourceLabel = '研招网接�
   if (!payload || typeof payload !== 'object') {
     throw new Error(`${sourceLabel}返回格式异常`);
   }
-  if (payload.flag === false) {
+  const payloadFlag = payload.flag;
+  const isFailedFlag =
+    payloadFlag === false ||
+    payloadFlag === 0 ||
+    (typeof payloadFlag === 'string' && ['false', '0'].includes(payloadFlag.trim().toLowerCase()));
+  if (isFailedFlag) {
     throw new Error(normalizeText(payload.msg || `${sourceLabel}请求失败`));
   }
   if (withResponse) {
@@ -4857,17 +4877,183 @@ function pickMatchedMajorCandidates(catalog, majorKeyword, maxCandidates = 10) {
   return { picked, hintSet };
 }
 
+function randomIntInRange(minValue, maxValue) {
+  const min = Math.max(0, Number(minValue) || 0);
+  const max = Math.max(min, Number(maxValue) || min);
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function isYanzhaoBlockedMessageLike(messageLike) {
+  const message = normalizeText(messageLike || '');
+  if (!message) return false;
+  return /请登录|登录|访问过于频繁|安全验证|验证码|会话|权限|风控|校验/.test(message);
+}
+
+function extractYanzhaoBlockedMessageFromPayload(payloadLike) {
+  const payload = payloadLike && typeof payloadLike === 'object' ? payloadLike : null;
+  if (!payload) return '';
+  const msgValue = payload.msg;
+  const candidates = [];
+  if (typeof msgValue === 'string') {
+    candidates.push(msgValue);
+  } else if (msgValue && typeof msgValue === 'object') {
+    candidates.push(msgValue.message, msgValue.msg, msgValue.error, msgValue.errMsg, msgValue.desc, msgValue.reason, msgValue.tip);
+  }
+  candidates.push(payload.message, payload.error, payload.errMsg, payload.desc, payload.reason);
+  for (const candidate of candidates) {
+    const text = normalizeText(candidate || '');
+    if (isYanzhaoBlockedMessageLike(text)) {
+      return text;
+    }
+  }
+  return '';
+}
+
+function isYanzhaoDeepPageBlockedError(error) {
+  const message = normalizeText(error?.message || error || '');
+  return isYanzhaoBlockedMessageLike(message);
+}
+
+function upsertYanzhaoMatchedSchool(outputList, seenSet, schoolLike) {
+  const school = normalizeYanzhaoSchoolRecord(schoolLike);
+  if (!school.dwmc) return false;
+  const key = school.dwdm || normalizeMatchText(school.dwmc);
+  if (!key || seenSet.has(key)) return false;
+  seenSet.add(key);
+  outputList.push(school);
+  return true;
+}
+
+async function queryYanzhaoSchoolsByMajorByProvinceShards(major, options = {}) {
+  const maxSchools = Math.max(1, Math.min(1200, Number(options.maxSchools) || 500));
+  const maxPagesPerProvince = Math.max(1, Math.min(12, Number(options.maxPagesPerProvince) || YANZHAO_PROVINCE_SHARD_MAX_PAGES));
+  const seedSchools = Array.isArray(options.seedSchools) ? options.seedSchools : [];
+  const output = [];
+  const seen = new Set();
+  let blockedProvinceHits = 0;
+  let scannedProvinces = 0;
+  let addedSchools = 0;
+
+  seedSchools.forEach((school) => {
+    upsertYanzhaoMatchedSchool(output, seen, school);
+  });
+
+  for (const province of YANZHAO_PROVINCE_LIST) {
+    if (output.length >= maxSchools) break;
+    scannedProvinces += 1;
+
+    let curPage = 1;
+    let totalPage = 1;
+    let pageSize = 10;
+    const sessionState = createYanzhaoSessionState();
+
+    while (curPage <= totalPage && curPage <= maxPagesPerProvince && output.length < maxSchools) {
+      const start = (curPage - 1) * pageSize;
+      let resp;
+      try {
+        resp = await postYanzhaoFormWithSession(
+          '/zsml/rs/zydws.do',
+          {
+            zydm: major.zydm,
+            zymc: major.zymc,
+            dwmc: '',
+            dwdm: '',
+            ssdm: province.code,
+            xxfs: '',
+            dwlxs: ['all'],
+            tydxs: '',
+            jsggjh: '',
+            sign: major.sign,
+            start,
+            curPage,
+            pageSize
+          },
+          `研招网专业院校分片(${major.zymc}-${province.name})`,
+          sessionState
+        );
+      } catch (error) {
+        if (curPage > 1 && isYanzhaoDeepPageBlockedError(error)) {
+          blockedProvinceHits += 1;
+        }
+        break;
+      }
+
+      const blockedPayloadMessage = extractYanzhaoBlockedMessageFromPayload(resp);
+      if (blockedPayloadMessage) {
+        if (curPage > 1) {
+          blockedProvinceHits += 1;
+        }
+        break;
+      }
+
+      const msg = resp.msg || {};
+      const list = Array.isArray(msg.list) ? msg.list : [];
+      totalPage = Math.max(1, Number(msg.totalPage) || totalPage);
+      pageSize = Math.max(1, Number(msg.pageCount) || pageSize);
+
+      for (const raw of list) {
+        const inserted = upsertYanzhaoMatchedSchool(output, seen, raw);
+        if (inserted) addedSchools += 1;
+        if (output.length >= maxSchools) break;
+      }
+
+      if (!list.length) {
+        if (curPage > 1 && totalPage > curPage) {
+          blockedProvinceHits += 1;
+        }
+        break;
+      }
+      curPage += 1;
+      if (curPage <= totalPage && curPage <= maxPagesPerProvince && output.length < maxSchools) {
+        await sleep(randomIntInRange(YANZHAO_PROVINCE_SHARD_DELAY_MIN_MS, YANZHAO_PROVINCE_SHARD_DELAY_MAX_MS));
+      }
+    }
+
+    if (output.length >= maxSchools) break;
+    await sleep(randomIntInRange(YANZHAO_PROVINCE_SHARD_DELAY_MIN_MS, YANZHAO_PROVINCE_SHARD_DELAY_MAX_MS));
+  }
+
+  return {
+    schools: output.slice(0, maxSchools),
+    diagnostics: {
+      triggered: true,
+      scannedProvinces,
+      blockedProvinceHits,
+      addedSchools
+    }
+  };
+}
+
 async function queryYanzhaoSchoolsByMajor(major, options = {}) {
   const maxPages = Math.max(1, Math.min(20, Number(options.maxPages) || 8));
   const maxSchools = Math.max(1, Math.min(1200, Number(options.maxSchools) || 500));
+  const shardMaxPagesPerProvince = Math.max(
+    1,
+    Math.min(12, Number(options.shardMaxPagesPerProvince) || YANZHAO_PROVINCE_SHARD_MAX_PAGES)
+  );
   if (!major?.zydm || !major?.zymc || !major?.sign) {
-    return [];
+    return {
+      schools: [],
+      diagnostics: {
+        nationalPagesFetched: 0,
+        nationalBlockedAtDeepPage: false,
+        blockedReason: '',
+        provinceShardTriggered: false,
+        provinceShardScanned: 0,
+        provinceShardAddedSchools: 0,
+        provinceShardBlockedHits: 0
+      }
+    };
   }
   const output = [];
   const seen = new Set();
   let curPage = 1;
   let totalPage = 1;
   let pageSize = 10;
+  let deepPageBlocked = false;
+  let blockedReason = '';
+  let nationalPagesFetched = 0;
+  const sessionState = createYanzhaoSessionState();
   while (curPage <= totalPage && curPage <= maxPages && output.length < maxSchools) {
     const start = (curPage - 1) * pageSize;
     let resp;
@@ -4889,29 +5075,76 @@ async function queryYanzhaoSchoolsByMajor(major, options = {}) {
           curPage,
           pageSize
         },
-        `研招网专业院校匹配(${major.zymc})`
+        `研招网专业院校匹配(${major.zymc})`,
+        sessionState
       );
     } catch (error) {
+      if (curPage > 1 && isYanzhaoDeepPageBlockedError(error)) {
+        deepPageBlocked = true;
+        blockedReason = error?.message || '未知错误';
+        break;
+      }
       if (output.length) break;
       throw error;
     }
+
+    const blockedPayloadMessage = extractYanzhaoBlockedMessageFromPayload(resp);
+    if (blockedPayloadMessage) {
+      if (curPage > 1) {
+        deepPageBlocked = true;
+        blockedReason = blockedPayloadMessage;
+        break;
+      }
+      if (output.length) break;
+      throw new Error(blockedPayloadMessage);
+    }
+
     const msg = resp.msg || {};
     const list = Array.isArray(msg.list) ? msg.list : [];
     totalPage = Math.max(1, Number(msg.totalPage) || totalPage);
     pageSize = Math.max(1, Number(msg.pageCount) || pageSize);
+    nationalPagesFetched = Math.max(nationalPagesFetched, curPage);
     for (const raw of list) {
-      const school = normalizeYanzhaoSchoolRecord(raw);
-      if (!school.dwmc) continue;
-      const key = school.dwdm || normalizeMatchText(school.dwmc);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      output.push(school);
+      upsertYanzhaoMatchedSchool(output, seen, raw);
       if (output.length >= maxSchools) break;
     }
-    if (!list.length) break;
+    if (!list.length) {
+      if (curPage > 1 && totalPage > curPage) {
+        deepPageBlocked = true;
+        blockedReason = blockedReason || '分页返回空结果，疑似触发访问限制';
+      }
+      break;
+    }
     curPage += 1;
   }
-  return output;
+
+  let provinceShardDiagnostics = null;
+  if (deepPageBlocked && output.length < maxSchools) {
+    console.warn(
+      `[major-test] 检测到深层分页限制，切换省份分片补抓：${major.zymc || major.zydm}；原因：${blockedReason || '未知'}`
+    );
+    const shardResult = await queryYanzhaoSchoolsByMajorByProvinceShards(major, {
+      maxSchools,
+      maxPagesPerProvince: shardMaxPagesPerProvince,
+      seedSchools: output
+    });
+    output.length = 0;
+    (Array.isArray(shardResult?.schools) ? shardResult.schools : []).forEach((school) => output.push(school));
+    provinceShardDiagnostics = shardResult?.diagnostics || null;
+  }
+
+  return {
+    schools: output,
+    diagnostics: {
+      nationalPagesFetched,
+      nationalBlockedAtDeepPage: deepPageBlocked,
+      blockedReason,
+      provinceShardTriggered: Boolean(provinceShardDiagnostics?.triggered),
+      provinceShardScanned: Number(provinceShardDiagnostics?.scannedProvinces || 0),
+      provinceShardAddedSchools: Number(provinceShardDiagnostics?.addedSchools || 0),
+      provinceShardBlockedHits: Number(provinceShardDiagnostics?.blockedProvinceHits || 0)
+    }
+  };
 }
 
 async function mapWithConcurrency(items, concurrency, worker) {
@@ -5143,10 +5376,10 @@ async function runAdjustmentMajorTest(options = {}) {
   const targetYear = extractAdjustmentYearText(options.targetYear || '');
   const keywords = parseKeywords(options.keywords || '');
   const forceRefresh = normalizeBooleanFlag(options.refreshCatalog, false);
-  const maxSchools = Math.max(1, Math.min(120, Number(options.maxSchools) || 20));
+  const maxSchools = Math.max(1, Math.min(300, Number(options.maxSchools) || 100));
   const maxPreviewSchools = Math.max(40, Math.min(1200, Number(options.maxPreviewSchools) || 400));
   const maxNoticesPerSchool = Math.max(4, Math.min(36, Number(options.maxNoticesPerSchool) || 14));
-  const maxMajorCandidates = Math.max(2, Math.min(14, Number(options.maxMajorCandidates) || 8));
+  const maxMajorCandidates = Math.max(2, Math.min(20, Number(options.maxMajorCandidates) || 16));
   const previewOnly = normalizeBooleanFlag(options.previewOnly, false);
   const usePrioritySchools = normalizeBooleanFlag(options.usePrioritySchools, true);
   const enableSearchFallback = normalizeBooleanFlag(options.enableSearchFallback, true);
@@ -5216,10 +5449,22 @@ async function runAdjustmentMajorTest(options = {}) {
 
   const schoolMap = new Map();
   const majorSchoolErrors = [];
+  const shardFallbackDiagnostics = [];
   for (const major of majorCandidates) {
     let schools = [];
     try {
-      schools = await queryYanzhaoSchoolsByMajor(major, { maxPages: 10, maxSchools: 900 });
+      const queryResult = await queryYanzhaoSchoolsByMajor(major, { maxPages: 10, maxSchools: 900 });
+      schools = Array.isArray(queryResult?.schools) ? queryResult.schools : [];
+      const queryDiagnostics = queryResult?.diagnostics || null;
+      if (queryDiagnostics && queryDiagnostics.provinceShardTriggered) {
+        shardFallbackDiagnostics.push({
+          zydm: major.zydm,
+          zymc: major.zymc,
+          provinceShardScanned: Number(queryDiagnostics.provinceShardScanned || 0),
+          provinceShardAddedSchools: Number(queryDiagnostics.provinceShardAddedSchools || 0),
+          provinceShardBlockedHits: Number(queryDiagnostics.provinceShardBlockedHits || 0)
+        });
+      }
     } catch (error) {
       majorSchoolErrors.push(`${major.zymc || major.zydm}: ${error.message || '请求失败'}`);
       schools = [];
@@ -5257,6 +5502,7 @@ async function runAdjustmentMajorTest(options = {}) {
         .slice(0, 5)
     }))
     .sort((a, b) => b.score - a.score || a.schoolName.localeCompare(b.schoolName));
+  const catalogSchoolBase = primarySchoolCandidates.length;
   const schoolCandidateLimit = Math.max(
     previewOnly ? maxPreviewSchools : maxSchools,
     selectedSchoolKeys.size || 0
@@ -5277,6 +5523,13 @@ async function runAdjustmentMajorTest(options = {}) {
   }
 
   if (previewOnly) {
+    const shardFallbackTriggered = shardFallbackDiagnostics.length > 0;
+    const shardScanned = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardScanned || 0)), 0);
+    const shardAdded = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardAddedSchools || 0)), 0);
+    const shardBlockedHits = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardBlockedHits || 0)), 0);
+    const warnings = shardFallbackTriggered
+      ? [`检测到深层分页限制，已自动切换至省份级矩阵扫描（触发专业 ${shardFallbackDiagnostics.length} 个）。`]
+      : [];
     return {
       checkedAt: nowIsoSafe(),
       query: {
@@ -5300,7 +5553,9 @@ async function runAdjustmentMajorTest(options = {}) {
       schoolCandidates,
       schools: [],
       summary: {
+        catalogSchoolBase,
         schoolsFromCatalog: schoolCandidates.length,
+        schoolsParsed: 0,
         schoolsScanned: 0,
         schoolsWithResult: 0,
         failedSchools: 0,
@@ -5314,8 +5569,14 @@ async function runAdjustmentMajorTest(options = {}) {
         previewOnly: true,
         prioritySchoolSeeds: prioritySchoolSeeds.length,
         userPrioritySchools: userPrioritySchoolSeeds.length,
-        builtinPriorityRules: builtinPrioritySchoolSeeds.length
+        builtinPriorityRules: builtinPrioritySchoolSeeds.length,
+        provinceShardTriggered: shardFallbackTriggered,
+        provinceShardMajorCount: shardFallbackDiagnostics.length,
+        provinceShardScannedProvinces: shardScanned,
+        provinceShardAddedSchools: shardAdded,
+        provinceShardBlockedHits: shardBlockedHits
       },
+      warnings,
       items: []
     };
   }
@@ -5367,9 +5628,18 @@ async function runAdjustmentMajorTest(options = {}) {
   const usedCacheFallback = freshItems.length === 0 && finalItems.length > 0;
   const schoolResultCount = schools.filter((school) => Array.isArray(school.notices) && school.notices.length > 0).length;
   const fallbackSchoolCount = new Set(finalItems.map((item) => normalizeMatchText(item.schoolName || '')).filter(Boolean)).size;
+  const shardFallbackTriggered = shardFallbackDiagnostics.length > 0;
+  const shardScanned = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardScanned || 0)), 0);
+  const shardAdded = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardAddedSchools || 0)), 0);
+  const shardBlockedHits = shardFallbackDiagnostics.reduce((sum, item) => sum + Math.max(0, Number(item.provinceShardBlockedHits || 0)), 0);
+  const warnings = shardFallbackTriggered
+    ? [`检测到深层分页限制，已自动切换至省份级矩阵扫描（触发专业 ${shardFallbackDiagnostics.length} 个）。`]
+    : [];
 
   const summary = {
+    catalogSchoolBase,
     schoolsFromCatalog: schoolCandidates.length,
+    schoolsParsed: schools.length,
     schoolsScanned: schools.length,
     schoolsWithResult: usedCacheFallback && schoolResultCount === 0 ? fallbackSchoolCount : schoolResultCount,
     failedSchools: schools.filter((school) => school.error).length,
@@ -5384,7 +5654,12 @@ async function runAdjustmentMajorTest(options = {}) {
     userPrioritySchools: userPrioritySchoolSeeds.length,
     builtinPriorityRules: builtinPrioritySchoolSeeds.length,
     searchFallbackSchools: schools.filter((school) => Boolean(school?.summary?.searchFallbackUsed)).length,
-    searchFallbackNotices: schools.reduce((sum, school) => sum + Math.max(0, Number(school?.summary?.searchFallbackAdded || 0)), 0)
+    searchFallbackNotices: schools.reduce((sum, school) => sum + Math.max(0, Number(school?.summary?.searchFallbackAdded || 0)), 0),
+    provinceShardTriggered: shardFallbackTriggered,
+    provinceShardMajorCount: shardFallbackDiagnostics.length,
+    provinceShardScannedProvinces: shardScanned,
+    provinceShardAddedSchools: shardAdded,
+    provinceShardBlockedHits: shardBlockedHits
   };
 
   const result = {
@@ -5408,6 +5683,7 @@ async function runAdjustmentMajorTest(options = {}) {
     majorCandidates,
     schools,
     summary,
+    warnings,
     items: finalItems
   };
 
@@ -5452,9 +5728,17 @@ function buildAdjustmentMajorTestMarkdown(result, selectedItems = []) {
   lines.push(`- 关键词: ${Array.isArray(query.keywords) && query.keywords.length ? query.keywords.join(' / ') : '-'}`);
   lines.push(`- 本地库更新时间: ${catalog.refreshedAt || '-'}`);
   lines.push(`- 本地库规模: 院校 ${catalog.schoolCount || 0} 所 / 专业 ${catalog.majorCount || 0} 条`);
-  lines.push(`- 匹配院校: ${summary.schoolsWithResult || 0}/${summary.schoolsScanned || 0} 所`);
+  lines.push(`- 开设院校基数: ${summary.catalogSchoolBase || summary.schoolsFromCatalog || 0} 所`);
+  lines.push(`- 候选院校池: ${summary.schoolsFromCatalog || 0} 所`);
+  lines.push(`- 执行抓取院校: ${summary.schoolsParsed || summary.schoolsScanned || 0} 所`);
+  lines.push(`- 命中公告院校: ${summary.schoolsWithResult || 0} 所`);
   lines.push(`- 公告命中: ${summary.totalNotices || 0} 条（名额 ${summary.withQuota || 0} 条，附件 ${summary.withAttachment || 0} 条）`);
   lines.push(`- 历史缓存辅助: 院校 ${summary.cacheAssistSchools || 0} 所 / 公告 ${summary.cacheAssistItems || 0} 条`);
+  if (summary.provinceShardTriggered) {
+    lines.push(
+      `- 分片补抓: 已触发（专业 ${summary.provinceShardMajorCount || 0} 个 / 省份 ${summary.provinceShardScannedProvinces || 0} 个 / 新增院校 ${summary.provinceShardAddedSchools || 0} 所）`
+    );
+  }
   lines.push(`- 是否使用历史回退: ${summary.usedCacheFallback ? '是（本次直接展示历史缓存）' : '否'}`);
   lines.push('');
   if (!allItems.length) {
