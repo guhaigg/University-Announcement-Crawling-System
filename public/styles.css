@@ -3850,3 +3850,180 @@ button.danger {
 .major-school-picker-list input[type='checkbox'] {
   margin-top: 2px;
 }
+
+/* --- 2026-03 mobile full-page adaptation --- */
+@media (max-width: 760px) {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .container {
+    padding: 12px 10px 28px !important;
+  }
+
+  .home-shell,
+  .home-center,
+  .home-side-left,
+  .module-panel,
+  .module-main,
+  .module-side,
+  .module-split,
+  .form-grid,
+  .verify-panel,
+  .preview-panel,
+  .card {
+    min-width: 0;
+  }
+
+  .home-shell {
+    display: grid;
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .home-side-left {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+  }
+
+  .side-floating-card {
+    max-height: none !important;
+    overflow: visible;
+  }
+
+  .masthead {
+    position: sticky;
+    top: 0;
+    z-index: 120;
+    padding: 8px 10px;
+  }
+
+  .masthead-inner {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  #masthead-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  #masthead-nav button {
+    width: auto !important;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .masthead-auth {
+    margin-left: 0;
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .hero-layout,
+  .hero-metrics,
+  .hero-ledger,
+  .feature-grid,
+  .workflow-grid,
+  .guide-grid,
+  .quick-guide-inline .guide-grid,
+  .form-grid,
+  .module-split {
+    grid-template-columns: 1fr !important;
+  }
+
+  .card,
+  .module-panel {
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .module-main form,
+  .module-panel > form {
+    padding: 12px;
+  }
+
+  h1 {
+    font-size: clamp(24px, 8vw, 32px);
+    max-width: none;
+  }
+
+  .module-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .module-tabs button {
+    width: 100%;
+  }
+
+  .actions,
+  .task-actions,
+  .inline-actions,
+  .hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .actions button,
+  .task-actions button,
+  .inline-actions button,
+  .hero-actions button {
+    width: 100% !important;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+  }
+
+  .scan-item,
+  .news-item,
+  .file-list li,
+  #manual-preset-list li,
+  .side-panel ul li {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .news-viewer-frame {
+    min-height: 360px;
+    width: 100%;
+  }
+
+  .auth-modal-content {
+    width: min(92vw, 420px);
+  }
+
+  .toast {
+    left: 10px;
+    right: 10px;
+    width: auto;
+  }
+
+  img,
+  video,
+  iframe {
+    max-width: 100%;
+    height: auto;
+  }
+}
